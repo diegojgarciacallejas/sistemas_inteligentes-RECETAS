@@ -6,9 +6,10 @@ import jade.core.behaviours.CyclicBehaviour;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 
+import model.GraphNode;
+
 import java.util.*;
-// formato que deb madndar  ontloghyagnet userIngredients=huevo,arroz,
-//pollo recipes=arroz con pollo:arroz,pollo,tomate;tortilla:huevo,patata,cebolla
+
 public class GraphBehaviour extends CyclicBehaviour {
 
     public GraphBehaviour(Agent agent) {
@@ -28,7 +29,9 @@ public class GraphBehaviour extends CyclicBehaviour {
             System.out.println("GraphAgent recibe:");
             System.out.println(msg.getContent());
 
-            String result = processGraph(msg.getContent());
+            List<GraphNode> graphNodes = processGraph(msg.getContent());
+
+            String result = buildOutputMessage(graphNodes);
 
             ACLMessage message = new ACLMessage(ACLMessage.INFORM);
             message.addReceiver(new AID("RecommendationAgent", AID.ISLOCALNAME));
@@ -45,14 +48,7 @@ public class GraphBehaviour extends CyclicBehaviour {
         }
     }
 
-    private String processGraph(String input) {
-
-        /*
-         Formato esperado de entrada:
-
-         userIngredients=huevo,arroz,pollo
-         recipes=arroz con pollo:arroz,pollo,tomate;tortilla:huevo,patata,cebolla
-        */
+    private List<GraphNode> processGraph(String input) {
 
         List<String> userIngredients = new ArrayList<>();
         Map<String, List<String>> recipeGraph = new LinkedHashMap<>();
@@ -73,7 +69,7 @@ public class GraphBehaviour extends CyclicBehaviour {
             }
         }
 
-        return calculateGraphScores(userIngredients, recipeGraph);
+        return calculateGraphNodes(userIngredients, recipeGraph);
     }
 
     private List<String> parseList(String text) {
@@ -111,14 +107,12 @@ public class GraphBehaviour extends CyclicBehaviour {
         return recipes;
     }
 
-    private String calculateGraphScores(
+    private List<GraphNode> calculateGraphNodes(
             List<String> userIngredients,
             Map<String, List<String>> recipeGraph
     ) {
 
-        StringBuilder result = new StringBuilder();
-
-        result.append("graphResults=\n");
+        List<GraphNode> graphNodes = new ArrayList<>();
 
         for (Map.Entry<String, List<String>> entry : recipeGraph.entrySet()) {
 
@@ -139,16 +133,28 @@ public class GraphBehaviour extends CyclicBehaviour {
                 graphScore = (double) matches / recipeIngredients.size();
             }
 
-            result.append(recipeName)
-                    .append(";ingredients=")
-                    .append(recipeIngredients)
-                    .append(";matches=")
-                    .append(matches)
-                    .append(";total=")
-                    .append(recipeIngredients.size())
-                    .append(";graphScore=")
-                    .append(String.format("%.2f", graphScore))
-                    .append("\n");
+            GraphNode node = new GraphNode(
+                    recipeName,
+                    recipeIngredients,
+                    matches,
+                    recipeIngredients.size(),
+                    graphScore
+            );
+
+            graphNodes.add(node);
+        }
+
+        return graphNodes;
+    }
+
+    private String buildOutputMessage(List<GraphNode> graphNodes) {
+
+        StringBuilder result = new StringBuilder();
+
+        result.append("graphResults=\n");
+
+        for (GraphNode node : graphNodes) {
+            result.append(node.toMessageFormat()).append("\n");
         }
 
         return result.toString();

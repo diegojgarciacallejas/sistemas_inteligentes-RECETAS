@@ -1,9 +1,12 @@
 package behaviours.recommendationbehaviours;
 
+import jade.core.AID;
 import jade.core.Agent;
 import jade.core.behaviours.CyclicBehaviour;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
+
+import model.RecipeScore;
 
 import java.util.*;
 
@@ -26,25 +29,32 @@ public class RecommendationBehaviour extends CyclicBehaviour {
             System.out.println("RecommendationAgent recibió:");
             System.out.println(msg.getContent());
 
-            String ranking = calculateRanking(msg.getContent());
+            List<RecipeScore> ranking =
+                    calculateRanking(msg.getContent());
+
+            String rankingMessage =
+                    buildRankingMessage(ranking);
 
             System.out.println("Ranking final calculado:");
-            System.out.println(ranking);
+            System.out.println(rankingMessage);
+
+            sendRankingToInterface(rankingMessage);
 
         } else {
             block();
         }
     }
 
-    private String calculateRanking(String graphResult) {
+    private List<RecipeScore> calculateRanking(String graphResult) {
 
-        List<RecipeResult> results = new ArrayList<>();
+        List<RecipeScore> results = new ArrayList<>();
 
         String[] lines = graphResult.split("\n");
 
         for (String line : lines) {
 
-            if (line.startsWith("graphResults=") || line.trim().isEmpty()) {
+            if (line.startsWith("graphResults=")
+                    || line.trim().isEmpty()) {
                 continue;
             }
 
@@ -52,31 +62,26 @@ public class RecommendationBehaviour extends CyclicBehaviour {
 
             double graphScore = extractGraphScore(line);
 
-            double finalScore = calculateFinalScore(graphScore);
+            double finalScore =
+                    calculateFinalScore(graphScore);
 
-            results.add(new RecipeResult(recipeName, graphScore, finalScore));
+            RecipeScore recipeScore =
+                    new RecipeScore(
+                            recipeName,
+                            graphScore,
+                            finalScore
+                    );
+
+            results.add(recipeScore);
         }
 
-        results.sort((a, b) -> Double.compare(b.finalScore, a.finalScore));
+        results.sort(
+                Comparator.comparingDouble(
+                        RecipeScore::getFinalScore
+                ).reversed()
+        );
 
-        StringBuilder sb = new StringBuilder();
-
-        int position = 1;
-
-        for (RecipeResult result : results) {
-            sb.append(position)
-                    .append(". ")
-                    .append(result.recipeName)
-                    .append(" | graphScore=")
-                    .append(String.format(Locale.US, "%.2f", result.graphScore))
-                    .append(" | finalScore=")
-                    .append(String.format(Locale.US, "%.2f", result.finalScore))
-                    .append("\n");
-
-            position++;
-        }
-
-        return sb.toString();
+        return results;
     }
 
     private double extractGraphScore(String line) {
@@ -87,7 +92,8 @@ public class RecommendationBehaviour extends CyclicBehaviour {
 
             if (part.startsWith("graphScore=")) {
 
-                String value = part.replace("graphScore=", "");
+                String value =
+                        part.replace("graphScore=", "");
 
                 value = value.replace(",", ".");
 
@@ -113,16 +119,60 @@ public class RecommendationBehaviour extends CyclicBehaviour {
                 + 0.10 * nutritionScore;
     }
 
-    private static class RecipeResult {
+    private String buildRankingMessage(List<RecipeScore> ranking) {
 
-        String recipeName;
-        double graphScore;
-        double finalScore;
+        StringBuilder sb = new StringBuilder();
 
-        RecipeResult(String recipeName, double graphScore, double finalScore) {
-            this.recipeName = recipeName;
-            this.graphScore = graphScore;
-            this.finalScore = finalScore;
+        sb.append("recommendationResults=\n");
+
+        int position = 1;
+
+        for (RecipeScore recipe : ranking) {
+
+            sb.append(position)
+                    .append(". ")
+                    .append(recipe.getRecipeName())
+                    .append(" | graphScore=")
+                    .append(String.format(Locale.US, "%.2f", recipe.getGraphScore()))
+                    .append(" | finalScore=")
+                    .append(String.format(Locale.US, "%.2f", recipe.getFinalScore()))
+                    .append(" | explanation=")
+                    .append(buildExplanation(recipe))
+                    .append("\n");
+
+            position++;
         }
+
+        return sb.toString();
+    }
+
+    private String buildExplanation(RecipeScore recipe) {
+
+        if (recipe.getGraphScore() >= 0.65) {
+            return "Muy recomendada porque coincide con la mayoría de ingredientes disponibles.";
+        }
+
+        if (recipe.getGraphScore() >= 0.30) {
+            return "Recomendación aceptable porque comparte algunos ingredientes con el usuario.";
+        }
+
+        return "Recomendación débil porque apenas coincide con los ingredientes disponibles.";
+    }
+
+    private void sendRankingToInterface(String rankingMessage) {
+
+        ACLMessage response = new ACLMessage(ACLMessage.INFORM);
+
+        response.addReceiver(
+                new AID("InterfaceAgent", AID.ISLOCALNAME)
+        );
+
+        response.setConversationId("RECOMMENDATION_RESULT");
+
+        response.setContent(rankingMessage);
+
+        myAgent.send(response);
+
+        System.out.println("RecommendationAgent envió ranking a InterfaceAgent");
     }
 }
