@@ -89,6 +89,7 @@ public class RecipeSearchAgent extends Agent {
                         }
 
                         JsonObject resultData = new JsonObject();
+                        resultData.addProperty("userIngredients", ingredients);  // línea nueva
                         resultData.add("recipes", resultRecipes);
                         
                         inform.setPerformative(ACLMessage.INFORM);
