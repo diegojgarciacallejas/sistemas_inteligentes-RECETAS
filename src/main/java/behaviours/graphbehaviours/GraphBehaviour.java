@@ -119,13 +119,19 @@ public class GraphBehaviour extends CyclicBehaviour {
             String recipeName = entry.getKey();
             List<String> recipeIngredients = entry.getValue();
 
-            int matches = 0;
+            List<String> matchedIngredients = new ArrayList<>();
+            List<String> missingIngredients = new ArrayList<>();
 
             for (String ingredient : recipeIngredients) {
+
                 if (userIngredients.contains(ingredient)) {
-                    matches++;
+                    matchedIngredients.add(ingredient);
+                } else {
+                    missingIngredients.add(ingredient);
                 }
             }
+
+            int matches = matchedIngredients.size();
 
             double graphScore = 0.0;
 
@@ -136,6 +142,8 @@ public class GraphBehaviour extends CyclicBehaviour {
             GraphNode node = new GraphNode(
                     recipeName,
                     recipeIngredients,
+                    matchedIngredients,
+                    missingIngredients,
                     matches,
                     recipeIngredients.size(),
                     graphScore
