@@ -1,4 +1,4 @@
-package ontology;
+package  behaviours.ontologybehaviours;
 
 public enum FoodCategory {
     PROTEIN,

@@ -1,4 +1,4 @@
-package ontology;
+package behaviours.ontologybehaviours;
 public class SubstitutionRule {
     private final String original;
     private final String substitute;
