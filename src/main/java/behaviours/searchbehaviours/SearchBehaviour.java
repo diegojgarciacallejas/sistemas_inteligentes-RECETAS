@@ -34,8 +34,9 @@ public class SearchBehaviour extends AchieveREResponder {
     private final HttpClient httpClient;
     private final Gson gson;
 
-    public SearchBehaviour(Agent a, MessageTemplate mt, HttpClient httpClient, Gson gson) {
-        super(a, mt);
+    // Constructor corregido (4 parámetros)
+    public SearchBehaviour(Agent agent, MessageTemplate mt, HttpClient httpClient, Gson gson) {
+        super(agent, mt);
         this.httpClient = httpClient;
         this.gson = gson;
     }

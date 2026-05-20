@@ -34,6 +34,7 @@ public class NutritionBehaviour extends AchieveREResponder {
     private final HttpClient httpClient;
     private final Gson gson;
 
+    // Constructor corregido (4 parámetros)
     public NutritionBehaviour(Agent a, MessageTemplate mt, HttpClient httpClient, Gson gson) {
         super(a, mt);
         this.httpClient = httpClient;
