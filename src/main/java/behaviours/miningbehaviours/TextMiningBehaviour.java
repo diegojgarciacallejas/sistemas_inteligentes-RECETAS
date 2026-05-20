@@ -1,4 +1,4 @@
-package behaviours.textminingbehaviours;
+package behaviours.miningbehaviours;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -17,6 +17,7 @@ import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -24,20 +25,20 @@ import java.util.Map;
  *
  * Behaviour cíclico que:
  *  1. Escucha mensajes con conversationId "RECIPE_SEARCH_RESULT" de RecipeSearchAgent
- *  2. Para cada receta, llama a Spoonacular /recipes/{id}/information
- *  3. Extrae y normaliza: ingredientes, tiempo, raciones, etiquetas dietéticas
- *  4. Construye un mensaje de texto compatible con GraphBehaviour
+ *  2. Para cada receta, llama a TheMealDB /lookup.php?i={id}
+ *  3. Extrae y normaliza: ingredientes (strIngredient1..20), área/cocina,
+ *     etiquetas dietéticas (strTags, strCategory) y tipo de plato
+ *  4. Construye un mensaje de texto compatible con GraphBehaviour y OntologyAgent
  *  5. Lo envía a OntologyAgent con conversationId "TEXT_MINING_RESULT"
  *
  * Diseño para testabilidad:
  *   La interfaz funcional RecipeFetcher separa la lógica HTTP del parsing.
- *   En producción se usa el fetcher real (Spoonacular).
+ *   En producción se usa el fetcher real (TheMealDB).
  *   En tests se inyecta una lambda que devuelve JSON hardcodeado, sin red.
  */
 public class TextMiningBehaviour extends CyclicBehaviour {
 
     // ── Constantes ──────────────────────────────────────────────────────────
-    private static final String API_KEY        = "74e8728ac10847199e9b7db0f0d97a4e";
     private static final String CONV_IN        = "RECIPE_SEARCH_RESULT";
     private static final String CONV_OUT       = "TEXT_MINING_RESULT";
     private static final String ONTOLOGY_AGENT = "OntologyAgent";
@@ -70,8 +71,7 @@ public class TextMiningBehaviour extends CyclicBehaviour {
 
         HttpClient httpClient = HttpClient.newHttpClient();
         this.fetcher = id -> {
-            String url = "https://api.spoonacular.com/recipes/" + id
-                    + "/information?apiKey=" + API_KEY;
+            String url = "https://www.themealdb.com/api/json/v1/1/lookup.php?i=" + id;
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
@@ -84,7 +84,7 @@ public class TextMiningBehaviour extends CyclicBehaviour {
             if (response.statusCode() == 200) {
                 return response.body();
             }
-            System.err.println("TextMiningAgent: Spoonacular devolvió "
+            System.err.println("TextMiningAgent: TheMealDB devolvió "
                     + response.statusCode() + " para id=" + id);
             return null;
         };
@@ -93,10 +93,6 @@ public class TextMiningBehaviour extends CyclicBehaviour {
     /**
      * Constructor para tests: acepta un RecipeFetcher externo.
      * No necesita JADE corriendo ni acceso a red.
-     *
-     * Ejemplo de uso en un test:
-     *   String fakeJson = "{ \"extendedIngredients\": [...] }";
-     *   TextMiningBehaviour b = new TextMiningBehaviour(null, id -> fakeJson);
      */
     TextMiningBehaviour(Agent agent, RecipeFetcher fetcher) {
         super(agent);
@@ -184,73 +180,129 @@ public class TextMiningBehaviour extends CyclicBehaviour {
             System.err.println("TextMiningAgent: error obteniendo receta id="
                     + id + " -> " + e.getMessage());
         }
-        return new RecipeData(name, new ArrayList<>(), -1, -1,
-                false, false, false, false);
+        return new RecipeData(name, new ArrayList<>(), new ArrayList<>(),
+                -1, -1, false, false, false, false,
+                new ArrayList<>(), new ArrayList<>(), -1);
     }
 
     /**
-     * Parsea el JSON de Spoonacular. No hace HTTP: testeable con cualquier String JSON.
+     * Parsea el JSON de TheMealDB. No hace HTTP: testeable con cualquier String JSON.
+     *
+     * TheMealDB devuelve: {"meals":[{...}]}
+     * Ingredientes en strIngredient1..strIngredient20 / strMeasure1..strMeasure20.
+     * Etiquetas dietéticas inferidas de strCategory y strTags.
+     * readyInMinutes y servings no están disponibles en TheMealDB → -1.
      */
     RecipeData extractRecipeData(String name, String jsonBody) {
         JsonObject data = gson.fromJson(jsonBody, JsonObject.class);
 
-        List<String> ingredients = new ArrayList<>();
-        if (data.has("extendedIngredients")) {
-            for (JsonElement el : data.getAsJsonArray("extendedIngredients")) {
-                JsonObject ing = el.getAsJsonObject();
-                if (ing.has("name") && !ing.get("name").isJsonNull()) {
-                    String normalized = normalize(ing.get("name").getAsString());
-                    if (!normalized.isEmpty()) {
-                        ingredients.add(normalized);
-                    }
-                }
-            }
+        // TheMealDB envuelve la respuesta en "meals":[{...}]
+        JsonObject meal;
+        if (data.has("meals") && !data.get("meals").isJsonNull()) {
+            meal = data.getAsJsonArray("meals").get(0).getAsJsonObject();
+        } else {
+            meal = data; // fallback para tests con objeto directo
         }
 
-        int readyInMinutes = getIntSafe(data, "readyInMinutes");
-        int servings       = getIntSafe(data, "servings");
-        boolean vegan      = getBoolSafe(data, "vegan");
-        boolean vegetarian = getBoolSafe(data, "vegetarian");
-        boolean glutenFree = getBoolSafe(data, "glutenFree");
-        boolean dairyFree  = getBoolSafe(data, "dairyFree");
+        List<String> ingredients       = new ArrayList<>();
+        List<IngredientInfo> ingredientDetails = new ArrayList<>();
 
-        return new RecipeData(name, ingredients, readyInMinutes, servings,
-                vegan, vegetarian, glutenFree, dairyFree);
+        // strIngredient1..strIngredient20 (cadena vacía = sin ingrediente)
+        for (int i = 1; i <= 20; i++) {
+            String ing = getStringSafe(meal, "strIngredient" + i);
+            if (ing.isEmpty()) continue;
+            String normalized = normalize(ing);
+            if (normalized.isEmpty()) continue;
+            String measure = sanitizeUnit(getStringSafe(meal, "strMeasure" + i));
+            ingredients.add(normalized);
+            ingredientDetails.add(new IngredientInfo(normalized, 0, measure));
+        }
+
+        // Etiquetas dietéticas: inferidas de strCategory y strTags
+        String category = getStringSafe(meal, "strCategory").toLowerCase();
+        String tagsRaw  = getStringSafe(meal, "strTags").toLowerCase();
+
+        boolean vegetarian = category.contains("vegetarian") || tagsRaw.contains("vegetarian");
+        boolean vegan      = category.contains("vegan")      || tagsRaw.contains("vegan");
+        boolean glutenFree = tagsRaw.contains("gluten-free") || tagsRaw.contains("glutenfree");
+        boolean dairyFree  = tagsRaw.contains("dairy-free")  || tagsRaw.contains("dairyfree");
+
+        // Cocina: strArea (ej. "Italian", "Mexican")
+        List<String> cuisines = new ArrayList<>();
+        String area = getStringSafe(meal, "strArea");
+        if (!area.isEmpty() && !area.equalsIgnoreCase("unknown")) {
+            cuisines.add(sanitizeName(area).toLowerCase());
+        }
+
+        // Tipo de plato: categoría de TheMealDB
+        List<String> dishTypes = new ArrayList<>();
+        if (!category.isEmpty()) dishTypes.add(sanitizeName(category));
+
+        return new RecipeData(name, ingredients, ingredientDetails,
+                -1, -1, vegan, vegetarian, glutenFree, dairyFree,
+                cuisines, dishTypes, -1);
     }
 
     /**
      * Construye el mensaje de texto para OntologyAgent.
      *
-     * Lineas mandatorias (GraphBehaviour las lee directamente):
+     * Lineas existentes (retro-compatibles con GraphBehaviour y OntologyAgent):
      *   userIngredients=egg,rice,tomato
      *   recipes=RecipeName:ing1,ing2;OtraReceta:ing3
-     *
-     * Lineas opcionales (para OntologyAgent y futuros agentes):
      *   recipeTimes=RecipeName:20;OtraReceta:35
      *   recipeServings=RecipeName:4;OtraReceta:2
      *   recipeTags=RecipeName:vegetarian;OtraReceta:vegan,glutenFree
+     *
+     * Lineas nuevas (cantidades e información adicional):
+     *   recipeIngredients=RecipeName:ing1|2|cups,ing2|100|g;OtraReceta:ing3|1|unit
+     *   recipeCuisines=RecipeName:italian;OtraReceta:mediterranean
+     *   recipeDishTypes=RecipeName:lunch,main course;OtraReceta:dinner
+     *   recipeHealthScores=RecipeName:85;OtraReceta:72
+     *
+     * El separador '|' dentro de cada ingrediente en recipeIngredients indica:
+     *   nombre|cantidad|unidad
      */
     String buildOutputMessage(String userIngredients, Map<String, RecipeData> recipeDataMap) {
-        StringBuilder recipesLine  = new StringBuilder("recipes=");
-        StringBuilder timesLine    = new StringBuilder("recipeTimes=");
-        StringBuilder servingsLine = new StringBuilder("recipeServings=");
-        StringBuilder tagsLine     = new StringBuilder("recipeTags=");
+        StringBuilder recipesLine        = new StringBuilder("recipes=");
+        StringBuilder ingredientsLine    = new StringBuilder("recipeIngredients=");
+        StringBuilder timesLine          = new StringBuilder("recipeTimes=");
+        StringBuilder servingsLine       = new StringBuilder("recipeServings=");
+        StringBuilder tagsLine           = new StringBuilder("recipeTags=");
+        StringBuilder cuisinesLine       = new StringBuilder("recipeCuisines=");
+        StringBuilder dishTypesLine      = new StringBuilder("recipeDishTypes=");
+        StringBuilder healthScoresLine   = new StringBuilder("recipeHealthScores=");
 
         boolean first = true;
         for (Map.Entry<String, RecipeData> entry : recipeDataMap.entrySet()) {
             if (!first) {
                 recipesLine.append(";");
+                ingredientsLine.append(";");
                 timesLine.append(";");
                 servingsLine.append(";");
                 tagsLine.append(";");
+                cuisinesLine.append(";");
+                dishTypesLine.append(";");
+                healthScoresLine.append(";");
             }
             first = false;
 
             String     key = entry.getKey();
             RecipeData d   = entry.getValue();
 
+            // Línea existente: solo nombres de ingredientes
             recipesLine.append(key).append(":")
                     .append(String.join(",", d.ingredients));
+
+            // Línea nueva: nombre|cantidad|unidad por ingrediente
+            ingredientsLine.append(key).append(":");
+            for (int i = 0; i < d.ingredientDetails.size(); i++) {
+                if (i > 0) ingredientsLine.append(",");
+                IngredientInfo info = d.ingredientDetails.get(i);
+                ingredientsLine.append(info.name)
+                        .append("|").append(formatAmount(info.amount))
+                        .append("|").append(info.unit);
+            }
+
             timesLine.append(key).append(":").append(d.readyInMinutes);
             servingsLine.append(key).append(":").append(d.servings);
 
@@ -260,13 +312,23 @@ public class TextMiningBehaviour extends CyclicBehaviour {
             if (d.glutenFree) tags.add("glutenFree");
             if (d.dairyFree)  tags.add("dairyFree");
             tagsLine.append(key).append(":").append(String.join(",", tags));
+
+            cuisinesLine.append(key).append(":")
+                    .append(String.join(",", d.cuisines));
+            dishTypesLine.append(key).append(":")
+                    .append(String.join(",", d.dishTypes));
+            healthScoresLine.append(key).append(":").append(d.healthScore);
         }
 
         return "userIngredients=" + userIngredients + "\n"
-                + recipesLine   + "\n"
-                + timesLine     + "\n"
-                + servingsLine  + "\n"
-                + tagsLine      + "\n";
+                + recipesLine        + "\n"
+                + ingredientsLine    + "\n"
+                + timesLine          + "\n"
+                + servingsLine       + "\n"
+                + tagsLine           + "\n"
+                + cuisinesLine       + "\n"
+                + dishTypesLine      + "\n"
+                + healthScoresLine   + "\n";
     }
 
     // ── Utilidades ──────────────────────────────────────────────────────────
@@ -287,7 +349,6 @@ public class TextMiningBehaviour extends CyclicBehaviour {
     /**
      * Sanitiza un nombre de receta eliminando los separadores del protocolo.
      * ; y : se usan como delimitadores en el mensaje entre agentes.
-     * Ejemplo: "Pasta: Aglio; vegan" -> "Pasta Aglio vegan"
      */
     String sanitizeName(String name) {
         return name.replaceAll("[;:\n]", " ")
@@ -295,40 +356,99 @@ public class TextMiningBehaviour extends CyclicBehaviour {
                 .trim();
     }
 
-    private int     getIntSafe (JsonObject o, String k) {
+    /**
+     * Elimina de la unidad los separadores del protocolo (|, ;, :).
+     */
+    private String sanitizeUnit(String unit) {
+        if (unit == null) return "";
+        return unit.replaceAll("[|;:\n]", "").trim();
+    }
+
+    /**
+     * Formatea una cantidad eliminando decimales innecesarios.
+     * Ejemplos: 2.0 -> "2", 1.5 -> "1.5", 0.25 -> "0.25"
+     */
+    private String formatAmount(double amount) {
+        if (amount <= 0) return "0";
+        if (amount == Math.floor(amount) && !Double.isInfinite(amount)) {
+            return String.valueOf((int) amount);
+        }
+        String formatted = String.format(Locale.US, "%.2f", amount);
+        formatted = formatted.replaceAll("0+$", "").replaceAll("\\.$", "");
+        return formatted;
+    }
+
+    private int     getIntSafe   (JsonObject o, String k) {
         return o.has(k) && !o.get(k).isJsonNull() ? o.get(k).getAsInt() : -1;
     }
-    private boolean getBoolSafe(JsonObject o, String k) {
+    private double  getDoubleSafe(JsonObject o, String k) {
+        return o.has(k) && !o.get(k).isJsonNull() ? o.get(k).getAsDouble() : 0.0;
+    }
+    private boolean getBoolSafe  (JsonObject o, String k) {
         return o.has(k) && !o.get(k).isJsonNull() && o.get(k).getAsBoolean();
+    }
+    private String  getStringSafe(JsonObject o, String k) {
+        return o.has(k) && !o.get(k).isJsonNull() ? o.get(k).getAsString() : "";
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    // Clase de datos
+    // Clases de datos
     // ════════════════════════════════════════════════════════════════════════
 
-    /** Datos extraidos de una receta. Campos -1 = Spoonacular no los devolvio. */
-    static class RecipeData {
-        final String       name;
-        final List<String> ingredients;
-        final int          readyInMinutes;
-        final int          servings;
-        final boolean      vegan;
-        final boolean      vegetarian;
-        final boolean      glutenFree;
-        final boolean      dairyFree;
+    /** Ingrediente con nombre, cantidad y unidad de medida. */
+    static class IngredientInfo {
+        final String name;
+        final double amount;
+        final String unit;
 
-        RecipeData(String name, List<String> ingredients,
+        IngredientInfo(String name, double amount, String unit) {
+            this.name   = name;
+            this.amount = amount;
+            this.unit   = unit;
+        }
+    }
+
+    /**
+     * Datos extraidos de una receta.
+     * Campos -1 = Spoonacular no los devolvio.
+     * ingredients: nombres normalizados (compatibilidad con GraphBehaviour/OntologyAgent).
+     * ingredientDetails: mismos ingredientes con cantidad y unidad.
+     */
+    static class RecipeData {
+        final String             name;
+        final List<String>       ingredients;
+        final List<IngredientInfo> ingredientDetails;
+        final int                readyInMinutes;
+        final int                servings;
+        final boolean            vegan;
+        final boolean            vegetarian;
+        final boolean            glutenFree;
+        final boolean            dairyFree;
+        final List<String>       cuisines;
+        final List<String>       dishTypes;
+        final int                healthScore;
+
+        RecipeData(String name,
+                   List<String> ingredients,
+                   List<IngredientInfo> ingredientDetails,
                    int readyInMinutes, int servings,
                    boolean vegan, boolean vegetarian,
-                   boolean glutenFree, boolean dairyFree) {
-            this.name           = name;
-            this.ingredients    = ingredients;
-            this.readyInMinutes = readyInMinutes;
-            this.servings       = servings;
-            this.vegan          = vegan;
-            this.vegetarian     = vegetarian;
-            this.glutenFree     = glutenFree;
-            this.dairyFree      = dairyFree;
+                   boolean glutenFree, boolean dairyFree,
+                   List<String> cuisines,
+                   List<String> dishTypes,
+                   int healthScore) {
+            this.name              = name;
+            this.ingredients       = ingredients;
+            this.ingredientDetails = ingredientDetails;
+            this.readyInMinutes    = readyInMinutes;
+            this.servings          = servings;
+            this.vegan             = vegan;
+            this.vegetarian        = vegetarian;
+            this.glutenFree        = glutenFree;
+            this.dairyFree         = dairyFree;
+            this.cuisines          = cuisines;
+            this.dishTypes         = dishTypes;
+            this.healthScore       = healthScore;
         }
     }
 }

@@ -154,11 +154,11 @@ public class InterfaceAgent extends Agent {
         int row = 0;
 
         // Ingredientes
-        tfIngredients = new JTextField("arroz, pollo, huevo, tomate");
-        addRow(inputPanel, gbc, row++, "1. Ingredientes disponibles:", tfIngredients);
+        tfIngredients = new JTextField("chicken, tomato, onion, garlic");
+        addRow(inputPanel, gbc, row++, "1. Ingredientes disponibles (en inglés):", tfIngredients);
 
         // Cantidades
-        tfQuantities = new JTextField("arroz 200g, huevos 2, pollo 300g");
+        tfQuantities = new JTextField("chicken 300g, tomato 2, onion 1");
         addRow(inputPanel, gbc, row++, "2. Cantidades disponibles:", tfQuantities);
 
         // Número de personas
