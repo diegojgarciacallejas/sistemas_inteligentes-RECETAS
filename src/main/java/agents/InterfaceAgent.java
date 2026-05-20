@@ -9,6 +9,7 @@ import jade.domain.DFService;
 import jade.domain.FIPAException;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
 import jade.domain.FIPAAgentManagement.ServiceDescription;
+import jade.domain.FIPANames;
 
 import javax.swing.*;
 import javax.swing.border.*;
@@ -60,7 +61,10 @@ public class InterfaceAgent extends Agent {
         // 2. Construir y mostrar la GUI en el hilo de Swing
         SwingUtilities.invokeLater(this::buildGUI);
 
-        // 3. Añadir comportamiento para recibir el ranking final (bloqueante)
+        // 3. Recibir respuesta de RecipeSearchAgent y reenviar a TextMiningAgent
+        addBehaviour(new ForwardToTextMiningBehaviour());
+
+        // 4. Añadir comportamiento para recibir el ranking final (bloqueante)
         addBehaviour(new WaitForRecommendationBehaviour());
     }
 
@@ -262,6 +266,7 @@ public class InterfaceAgent extends Agent {
 
                 ACLMessage msg = new ACLMessage(ACLMessage.REQUEST);
                 msg.addReceiver(recipeSearchAgent);
+                msg.setProtocol(FIPANames.InteractionProtocol.FIPA_REQUEST);
                 msg.setConversationId(CONV_USER_REQUEST);
                 msg.setContent(content);
                 msg.setLanguage("UTF-8");
@@ -294,6 +299,37 @@ public class InterfaceAgent extends Agent {
                 + "restrictions="+ tfRestrictions.getText().trim()+ "\n"
                 + "preferences=" + tfPreferences.getText().trim() + "\n"
                 + "mealType="    + cbMealType.getSelectedItem();
+    }
+
+    // =========================================================================
+    // Comportamiento: recibir respuesta de RecipeSearchAgent y reenviar a TextMiningAgent
+    // =========================================================================
+
+    /**
+     * Escucha el INFORM que SearchBehaviour devuelve con conversationId = USER_REQUEST
+     * y lo reenvía a TextMiningAgent con conversationId = RECIPE_SEARCH_RESULT.
+     */
+    private class ForwardToTextMiningBehaviour extends CyclicBehaviour {
+
+        private final MessageTemplate MT = MessageTemplate.and(
+                MessageTemplate.MatchConversationId(CONV_USER_REQUEST),
+                MessageTemplate.MatchPerformative(ACLMessage.INFORM)
+        );
+
+        @Override
+        public void action() {
+            ACLMessage msg = myAgent.receive(MT);
+            if (msg != null) {
+                log.info("Respuesta de RecipeSearchAgent recibida. Reenviando a TextMiningAgent...");
+                ACLMessage forward = new ACLMessage(ACLMessage.INFORM);
+                forward.addReceiver(new AID("TextMiningAgent", AID.ISLOCALNAME));
+                forward.setConversationId("RECIPE_SEARCH_RESULT");
+                forward.setContent(msg.getContent());
+                myAgent.send(forward);
+            } else {
+                block();
+            }
+        }
     }
 
     // =========================================================================
