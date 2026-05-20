@@ -6,6 +6,7 @@ import jade.core.behaviours.CyclicBehaviour;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import behaviours.ontologybehaviours.FoodOntology;
+import behaviours.ontologybehaviours.FoodCategory;
 import utils.DFUtils;
 
 import java.util.*;
@@ -17,7 +18,10 @@ public class OntologyAgent extends Agent {
         System.out.println(getLocalName() + " iniciado.");
         DFUtils.registerService(this, "ontology-service");
 
-        // Escucha mensajes de TextMiningAgent
+        // Forzamos la carga de FoodOn al arrancar el agente
+        System.out.println("OntologyAgent: iniciando carga de FoodOn...");
+        FoodOntology.getCategory("tomato");
+
         addBehaviour(new CyclicBehaviour() {
             @Override
             public void action() {
@@ -47,24 +51,18 @@ public class OntologyAgent extends Agent {
     }
 
     private String processOntology(String input) {
-        // Parseamos las líneas del mensaje
         String userIngredients = "";
-        String recipesLine = "";
-        String timesLine = "";
-        String servingsLine = "";
-        String tagsLine = "";
+        String recipesValue    = "";
+        List<String> otherLines = new ArrayList<>();
 
         for (String line : input.split("\n")) {
+            if (line.trim().isEmpty()) continue;
             if (line.startsWith("userIngredients=")) {
                 userIngredients = line.replace("userIngredients=", "").trim();
             } else if (line.startsWith("recipes=")) {
-                recipesLine = line.replace("recipes=", "").trim();
-            } else if (line.startsWith("recipeTimes=")) {
-                timesLine = line;
-            } else if (line.startsWith("recipeServings=")) {
-                servingsLine = line;
-            } else if (line.startsWith("recipeTags=")) {
-                tagsLine = line;
+                recipesValue = line.replace("recipes=", "").trim();
+            } else {
+                otherLines.add(line);
             }
         }
 
@@ -75,23 +73,18 @@ public class OntologyAgent extends Agent {
             if (!normalized.isEmpty()) userIngList.add(normalized);
         }
 
-        // Procesamos cada receta aplicando la ontología
-        // Para cada ingrediente que falta, buscamos si el usuario tiene un sustituto
+        // Enriquecer los ingredientes de cada receta con sustitutos de FoodOn
         StringBuilder enrichedRecipes = new StringBuilder("recipes=");
         boolean firstRecipe = true;
 
-        if (!recipesLine.isEmpty()) {
-            String[] recipeEntries = recipesLine.split(";");
-            for (String entry : recipeEntries) {
+        if (!recipesValue.isEmpty()) {
+            for (String entry : recipesValue.split(";")) {
                 String[] parts = entry.split(":", 2);
                 if (parts.length != 2) continue;
 
-                String recipeName = parts[0].trim();
+                String   recipeName        = parts[0].trim();
                 String[] recipeIngredients = parts[1].split(",");
 
-                // Construimos la lista enriquecida de ingredientes
-                // Si falta un ingrediente pero el usuario tiene un sustituto,
-                // lo añadimos como ingrediente disponible
                 List<String> enrichedIngredients = new ArrayList<>();
                 for (String ing : recipeIngredients) {
                     String normalized = ing.trim().toLowerCase();
@@ -99,13 +92,11 @@ public class OntologyAgent extends Agent {
 
                     enrichedIngredients.add(normalized);
 
-                    // Si el usuario no tiene este ingrediente, buscamos sustitutos
+                    // Si el usuario no tiene este ingrediente buscamos sustitutos en FoodOn
                     if (!userIngList.contains(normalized)) {
                         List<String> substitutes = FoodOntology.findSubstitutes(
                                 normalized, userIngList);
                         if (!substitutes.isEmpty()) {
-                            // Añadimos el sustituto como ingrediente disponible
-                            // para que GraphAgent lo cuente como coincidencia
                             System.out.println("OntologyAgent: '"
                                     + normalized + "' puede sustituirse por '"
                                     + substitutes.get(0) + "' en " + recipeName);
@@ -121,13 +112,14 @@ public class OntologyAgent extends Agent {
             }
         }
 
-        // Reconstruimos el mensaje manteniendo el mismo formato
-        // que espera GraphBehaviour, añadiendo los ingredientes enriquecidos
-        return "userIngredients=" + userIngredients + "\n"
-                + enrichedRecipes + "\n"
-                + timesLine + "\n"
-                + servingsLine + "\n"
-                + tagsLine + "\n";
+        // Reconstruimos el mensaje manteniendo el formato que espera GraphAgent
+        StringBuilder output = new StringBuilder();
+        output.append("userIngredients=").append(userIngredients).append("\n");
+        output.append(enrichedRecipes).append("\n");
+        for (String line : otherLines) {
+            output.append(line).append("\n");
+        }
+        return output.toString();
     }
 
     @Override
