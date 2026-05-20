@@ -29,9 +29,19 @@ public class GraphBehaviour extends CyclicBehaviour {
             System.out.println("GraphAgent recibe:");
             System.out.println(msg.getContent());
 
+            // Extraer líneas de metadatos para reenviarlas a RecommendationAgent
+            String timesLine    = "";
+            String servingsLine = "";
+            String tagsLine     = "";
+            for (String line : msg.getContent().split("\n")) {
+                if (line.startsWith("recipeTimes="))       timesLine    = line;
+                else if (line.startsWith("recipeServings=")) servingsLine = line;
+                else if (line.startsWith("recipeTags="))    tagsLine     = line;
+            }
+
             List<GraphNode> graphNodes = processGraph(msg.getContent());
 
-            String result = buildOutputMessage(graphNodes);
+            String result = buildOutputMessage(graphNodes, timesLine, servingsLine, tagsLine);
 
             ACLMessage message = new ACLMessage(ACLMessage.INFORM);
             message.addReceiver(new AID("RecommendationAgent", AID.ISLOCALNAME));
@@ -155,7 +165,10 @@ public class GraphBehaviour extends CyclicBehaviour {
         return graphNodes;
     }
 
-    private String buildOutputMessage(List<GraphNode> graphNodes) {
+    private String buildOutputMessage(List<GraphNode> graphNodes,
+                                      String timesLine,
+                                      String servingsLine,
+                                      String tagsLine) {
 
         StringBuilder result = new StringBuilder();
 
@@ -164,6 +177,10 @@ public class GraphBehaviour extends CyclicBehaviour {
         for (GraphNode node : graphNodes) {
             result.append(node.toMessageFormat()).append("\n");
         }
+
+        if (!timesLine.isEmpty())    result.append(timesLine).append("\n");
+        if (!servingsLine.isEmpty()) result.append(servingsLine).append("\n");
+        if (!tagsLine.isEmpty())     result.append(tagsLine).append("\n");
 
         return result.toString();
     }

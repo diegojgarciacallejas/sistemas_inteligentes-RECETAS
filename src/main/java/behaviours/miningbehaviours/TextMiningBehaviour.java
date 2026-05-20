@@ -1,4 +1,4 @@
-package behaviours.textminingbehaviours;
+package behaviours.miningbehaviours;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
