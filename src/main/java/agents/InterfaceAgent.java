@@ -1,10 +1,9 @@
 package agents;
 
+import behaviours.interfacebehaviours.InterfaceAgentBehaviours;
 import jade.core.Agent;
 import jade.core.AID;
-import jade.core.behaviours.*;
 import jade.lang.acl.ACLMessage;
-import jade.lang.acl.MessageTemplate;
 import jade.domain.DFService;
 import jade.domain.FIPAException;
 import jade.domain.FIPANames;
@@ -27,27 +26,26 @@ import java.util.logging.Logger;
  *     con conversationId = RECOMMENDATION_RESULT.
  *  4. Mostrar el ranking de recetas recomendadas.
  */
-
 public class InterfaceAgent extends Agent {
 
     private static final Logger log = Logger.getLogger(InterfaceAgent.class.getName());
 
     // ── Conversation IDs acordados con el equipo ──────────────────────────────
-    public static final String CONV_USER_REQUEST        = "USER_REQUEST";
-    public static final String CONV_RECOMMENDATION      = "RECOMMENDATION_RESULT";
+    public static final String CONV_USER_REQUEST   = "USER_REQUEST";
+    public static final String CONV_RECOMMENDATION = "RECOMMENDATION_RESULT";
 
     // ── Campos de la GUI ──────────────────────────────────────────────────────
-    private JFrame  frame;
-    private JTextField tfIngredients;   // "arroz, pollo, huevo, tomate"
-    private JTextField tfQuantities;    // "arroz 200g, huevos 2, pollo 300g"
-    private JSpinner   spPersons;       // 1-10
-    private JSpinner   spMaxTime;       // minutos
-    private JTextField tfRestrictions;  // "vegetariano, sin gluten"
-    private JTextField tfPreferences;   // "rápido, saludable, sin horno"
-    private JComboBox<String> cbMealType; // comida, cena, desayuno, cualquiera
-    private JButton    btnSearch;
-    private JTextArea  taResults;
-    private JLabel     lblStatus;
+    JFrame             frame;
+    JTextField         tfIngredients;   // "arroz, pollo, huevo, tomate"
+    JTextField         tfQuantities;    // "arroz 200g, huevos 2, pollo 300g"
+    JSpinner           spPersons;       // 1-10
+    JSpinner           spMaxTime;       // minutos
+    JTextField         tfRestrictions;  // "vegetariano, sin gluten"
+    JTextField         tfPreferences;   // "rápido, saludable, sin horno"
+    JComboBox<String>  cbMealType;      // comida, cena, desayuno, cualquiera
+    JButton            btnSearch;
+    JTextArea          taResults;
+    JLabel             lblStatus;
 
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -62,12 +60,11 @@ public class InterfaceAgent extends Agent {
         SwingUtilities.invokeLater(this::buildGUI);
 
         // 3. Añadir comportamiento para recibir el ranking final (bloqueante)
-        addBehaviour(new WaitForRecommendationBehaviour());
+        addBehaviour(new InterfaceAgentBehaviours.WaitForRecommendationBehaviour(this));
     }
 
     @Override
     protected void takeDown() {
-        // Desregistrar del DF y cerrar GUI al apagar el agente
         try { DFService.deregister(this); } catch (FIPAException ignored) {}
         if (frame != null) frame.dispose();
         log.info("InterfaceAgent finalizado.");
@@ -99,12 +96,7 @@ public class InterfaceAgent extends Agent {
      * Busca el AID del RecipeSearchAgent en el DF.
      * Devuelve null si no está disponible.
      */
-    /*
-    private AID findRecipeSearchAgent() {
-        return new AID("RecipeSearchAgent", AID.ISLOCALNAME);
-    }
-    */
-    private AID findRecipeSearchAgent() {
+    public AID findRecipeSearchAgent() {
         DFAgentDescription template = new DFAgentDescription();
         ServiceDescription sd = new ServiceDescription();
         sd.setType("recipe-search");
@@ -150,35 +142,27 @@ public class InterfaceAgent extends Agent {
 
         int row = 0;
 
-        // Ingredientes
         tfIngredients = new JTextField("arroz, pollo, huevo, tomate");
         addRow(inputPanel, gbc, row++, "1. Ingredientes disponibles:", tfIngredients);
 
-        // Cantidades
         tfQuantities = new JTextField("arroz 200g, huevos 2, pollo 300g");
         addRow(inputPanel, gbc, row++, "2. Cantidades disponibles:", tfQuantities);
 
-        // Número de personas
         spPersons = new JSpinner(new SpinnerNumberModel(2, 1, 20, 1));
         addRow(inputPanel, gbc, row++, "3. Número de personas:", spPersons);
 
-        // Tiempo máximo
         spMaxTime = new JSpinner(new SpinnerNumberModel(30, 5, 180, 5));
         addRow(inputPanel, gbc, row++, "4. Tiempo máximo (minutos):", spMaxTime);
 
-        // Restricciones
         tfRestrictions = new JTextField("vegetariano, sin gluten");
         addRow(inputPanel, gbc, row++, "5. Restricciones alimentarias:", tfRestrictions);
 
-        // Preferencias
         tfPreferences = new JTextField("rápido, saludable, sin horno");
         addRow(inputPanel, gbc, row++, "6. Preferencias:", tfPreferences);
 
-        // Tipo de comida
         cbMealType = new JComboBox<>(new String[]{"cualquiera", "desayuno", "comida", "cena", "snack"});
         addRow(inputPanel, gbc, row++, "7. Tipo de comida (opcional):", cbMealType);
 
-        // Botón
         btnSearch = new JButton("🔍 Buscar recetas");
         btnSearch.setBackground(new Color(70, 130, 180));
         btnSearch.setForeground(Color.WHITE);
@@ -197,21 +181,18 @@ public class InterfaceAgent extends Agent {
         taResults = new JTextArea(12, 50);
         taResults.setEditable(false);
         taResults.setFont(new Font("Monospaced", Font.PLAIN, 12));
-        taResults.setText("Los resultados aparecerán aquí...");
         JScrollPane scrollPane = new JScrollPane(taResults);
         scrollPane.setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createEtchedBorder(), "Recetas recomendadas",
-                TitledBorder.LEFT, TitledBorder.TOP));
+                BorderFactory.createEtchedBorder(), "Resultados"));
 
-        // ── Barra de estado ───────────────────────────────────────────────────
         lblStatus = new JLabel("Listo.");
         lblStatus.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
         lblStatus.setFont(lblStatus.getFont().deriveFont(Font.ITALIC));
 
         // ── Ensamblaje ────────────────────────────────────────────────────────
-        frame.add(inputPanel,  BorderLayout.NORTH);
-        frame.add(scrollPane,  BorderLayout.CENTER);
-        frame.add(lblStatus,   BorderLayout.SOUTH);
+        frame.add(inputPanel, BorderLayout.NORTH);
+        frame.add(scrollPane, BorderLayout.CENTER);
+        frame.add(lblStatus,  BorderLayout.SOUTH);
         frame.setVisible(true);
     }
 
@@ -241,43 +222,15 @@ public class InterfaceAgent extends Agent {
         setStatus("Buscando recetas...");
         taResults.setText("Procesando solicitud, por favor espera...");
 
-        // Construir el contenido del mensaje con los datos del usuario
         String content = buildRequestContent();
         log.info("Solicitud construida:\n" + content);
 
-        // Enviar en un comportamiento one-shot para no bloquear la GUI
-        addBehaviour(new OneShotBehaviour() {
-            @Override
-            public void action() {
-                AID recipeSearchAgent = findRecipeSearchAgent();
-
-                if (recipeSearchAgent == null) {
-                    SwingUtilities.invokeLater(() -> {
-                        setStatus("❌ RecipeSearchAgent no encontrado en el DF.");
-                        taResults.setText("Error: RecipeSearchAgent no disponible.\n" +
-                                "Asegúrate de que esté iniciado antes de buscar.");
-                        btnSearch.setEnabled(true);
-                    });
-                    return;
-                }
-
-                ACLMessage msg = new ACLMessage(ACLMessage.REQUEST);
-                msg.addReceiver(recipeSearchAgent);
-                msg.setConversationId(CONV_USER_REQUEST);
-                msg.setProtocol(FIPANames.InteractionProtocol.FIPA_REQUEST);
-                msg.setContent(content);
-                msg.setLanguage("UTF-8");
-                send(msg);
-
-                log.info("USER_REQUEST enviado a " + recipeSearchAgent.getName());
-                SwingUtilities.invokeLater(() -> setStatus("✅ Solicitud enviada. Esperando resultados..."));
-            }
-        });
+        // Delegar en el behaviour para no bloquear la GUI
+        addBehaviour(new InterfaceAgentBehaviours.SendRequestBehaviour(this, content));
     }
 
     /**
-     * Serializa los datos del formulario en un formato clave=valor
-     * que los demás agentes pueden parsear fácilmente.
+     * Serializa los datos del formulario en formato clave=valor.
      *
      * Formato:
      *   ingredients=arroz,pollo,huevo,tomate
@@ -288,58 +241,30 @@ public class InterfaceAgent extends Agent {
      *   preferences=rápido,saludable,sin horno
      *   mealType=comida
      */
-    private String buildRequestContent() {
+    String buildRequestContent() {
         return "ingredients=" + tfIngredients.getText().trim() + "\n"
-                + "quantities="  + tfQuantities.getText().trim()  + "\n"
-                + "persons="     + spPersons.getValue()           + "\n"
-                + "maxTime="     + spMaxTime.getValue()           + "\n"
-                + "restrictions="+ tfRestrictions.getText().trim()+ "\n"
-                + "preferences=" + tfPreferences.getText().trim() + "\n"
-                + "mealType="    + cbMealType.getSelectedItem();
+             + "quantities="  + tfQuantities.getText().trim()  + "\n"
+             + "persons="     + spPersons.getValue()           + "\n"
+             + "maxTime="     + spMaxTime.getValue()           + "\n"
+             + "restrictions="+ tfRestrictions.getText().trim()+ "\n"
+             + "preferences=" + tfPreferences.getText().trim() + "\n"
+             + "mealType="    + cbMealType.getSelectedItem();
     }
 
     // =========================================================================
-    // Comportamiento bloqueante: esperar ranking del RecommendationAgent
-    // =========================================================================
-
-    /**
-     * Comportamiento cíclico con filtro de mensajes en modo BLOQUEANTE.
-     * Espera mensajes ACL con conversationId = RECOMMENDATION_RESULT.
-     */
-    private class WaitForRecommendationBehaviour extends CyclicBehaviour {
-
-        // Filtro: solo mensajes con el conversationId correcto
-        private final MessageTemplate MT = MessageTemplate.MatchConversationId(CONV_RECOMMENDATION);
-
-        @Override
-        public void action() {
-            ACLMessage msg = myAgent.receive(MT);
-
-            if (msg != null) {
-                log.info("RECOMMENDATION_RESULT recibido de " + msg.getSender().getName());
-                String ranking = msg.getContent();
-                SwingUtilities.invokeLater(() -> displayResults(ranking));
-            } else {
-                // Modo bloqueante: el agente se suspende hasta recibir un mensaje
-                block();
-            }
-        }
-    }
-
-    // =========================================================================
-    // Mostrar resultados
+    // Mostrar resultados  (llamado desde los behaviours)
     // =========================================================================
 
     /**
      * Parsea y muestra el ranking recibido del RecommendationAgent.
      *
-     * Formato esperado (acordado con RecommendationAgent):
+     * Formato esperado:
      *   RANK|recipeName|graphScore|finalScore
      *   1|Arroz con pollo|0.85|0.78
      *   2|Tortilla española|0.70|0.65
      *   ...
      */
-    private void displayResults(String content) {
+    public void displayResults(String content) {
         btnSearch.setEnabled(true);
 
         if (content == null || content.isBlank()) {
@@ -358,7 +283,6 @@ public class InterfaceAgent extends Agent {
             line = line.trim();
             if (line.isEmpty()) continue;
 
-            // Si la línea sigue el formato RANK|name|graphScore|finalScore
             if (line.matches("\\d+\\|.*")) {
                 String[] parts = line.split("\\|");
                 if (parts.length >= 4) {
@@ -370,13 +294,11 @@ public class InterfaceAgent extends Agent {
                     sb.append(String.format("  %s. %-35s\n", rank, name));
                     sb.append(String.format("     Coincidencia ingredientes : %.0f%%\n", graphScore * 100));
                     sb.append(String.format("     Puntuación final          : %.0f%%\n", finalScore * 100));
-                    sb.append("     " + scoreBar(finalScore) + "\n\n");
+                    sb.append("     ").append(scoreBar(finalScore)).append("\n\n");
                 } else {
-                    // Línea no parseable → mostrar tal cual
                     sb.append("  ").append(line).append("\n");
                 }
             } else {
-                // Cabecera u otro texto del RecommendationAgent
                 sb.append(line).append("\n");
             }
         }
@@ -384,7 +306,7 @@ public class InterfaceAgent extends Agent {
         sb.append("\n═══════════════════════════════════════════════════\n");
         taResults.setText(sb.toString());
         taResults.setCaretPosition(0);
-        setStatus("✅ " + (lines.length) + " recetas recibidas.");
+        setStatus("✅ " + lines.length + " recetas recibidas.");
     }
 
     /** Genera una barra visual de puntuación. Ejemplo: ████████░░ 80% */
@@ -398,7 +320,11 @@ public class InterfaceAgent extends Agent {
     // Utilidades
     // =========================================================================
 
-    private void setStatus(String msg) {
+    public void setStatus(String msg) {
         lblStatus.setText(msg);
+    }
+
+    public void enableSearch() {
+        btnSearch.setEnabled(true);
     }
 }
