@@ -1,1 +1,1 @@
-package main.java.model;
+package model;

@@ -1,6 +1,6 @@
-package main.java.agents;
+package agents;
 
-import behaviours.textminingbehaviours.TextMiningBehaviour;
+import behaviours.miningbehaviours.TextMiningBehaviour;
 import jade.core.Agent;
 import jade.domain.DFService;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
