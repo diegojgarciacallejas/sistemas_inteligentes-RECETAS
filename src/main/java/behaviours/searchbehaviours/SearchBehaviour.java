@@ -1,4 +1,3 @@
-// Source code is decompiled from a .class file using FernFlower decompiler (from Intellij IDEA).
 package behaviours.searchbehaviours;
 
 import com.google.gson.Gson;
@@ -9,6 +8,8 @@ import jade.core.Agent;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.proto.AchieveREResponder;
+import utils.IngredientTranslator;
+
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -18,68 +19,82 @@ import java.net.http.HttpResponse.BodyHandlers;
 import java.nio.charset.StandardCharsets;
 
 public class SearchBehaviour extends AchieveREResponder {
+
     private final HttpClient httpClient;
     private final Gson gson;
-    private final String apiKey;
 
-    public SearchBehaviour(Agent var1, MessageTemplate var2, HttpClient var3, Gson var4, String var5) {
-        super(var1, var2);
-        this.httpClient = var3;
-        this.gson = var4;
-        this.apiKey = var5;
+    public SearchBehaviour(Agent agent, MessageTemplate template, HttpClient httpClient, Gson gson) {
+        super(agent, template);
+        this.httpClient = httpClient;
+        this.gson = gson;
     }
 
-    protected ACLMessage handleRequest(ACLMessage var1) {
-        System.out.println("RecipeSearchAgent: Received request to search for: " + var1.getContent());
-        ACLMessage var2 = var1.createReply();
-        var2.setPerformative(1);
-        return var2;
+    protected ACLMessage handleRequest(ACLMessage request) {
+        System.out.println("RecipeSearchAgent: Received request to search for: " + request.getContent());
+        ACLMessage reply = request.createReply();
+        reply.setPerformative(ACLMessage.AGREE);
+        return reply;
     }
 
-    protected ACLMessage prepareResultNotification(ACLMessage var1, ACLMessage var2) {
-        ACLMessage var3 = var1.createReply();
-        String rawContent = var1.getContent().trim();
-        String var4 = rawContent;
+    protected ACLMessage prepareResultNotification(ACLMessage request, ACLMessage response) {
+        ACLMessage reply = request.createReply();
+        String rawContent = request.getContent().trim();
+        String ingredients = rawContent;
         for (String line : rawContent.split("\n")) {
             if (line.startsWith("ingredients=")) {
-                var4 = line.substring("ingredients=".length()).trim();
+                ingredients = line.substring("ingredients=".length()).trim();
                 break;
             }
         }
-        System.out.println("RecipeSearchAgent: Searching Spoonacular for: " + var4);
+
+        // Traducir ES→EN
+        String ingredientsEn = IngredientTranslator.translateIngredients(ingredients);
+        if (!ingredientsEn.equals(ingredients)) {
+            System.out.println("RecipeSearchAgent: traducción ES→EN: [" + ingredients + "] → [" + ingredientsEn + "]");
+        }
+        System.out.println("RecipeSearchAgent: Searching TheMealDB for: " + ingredientsEn);
 
         try {
-            String var5 = URLEncoder.encode(var4, StandardCharsets.UTF_8.toString());
-            String var6 = "https://api.spoonacular.com/recipes/findByIngredients?ingredients=" + var5 + "&number=3&apiKey=" + this.apiKey;
-            HttpRequest var7 = HttpRequest.newBuilder().uri(URI.create(var6)).GET().build();
-            HttpResponse var8 = this.httpClient.send(var7, BodyHandlers.ofString());
-            if (var8.statusCode() == 200) {
-                JsonArray var9 = (JsonArray)this.gson.fromJson((String)var8.body(), JsonArray.class);
-                JsonArray var10 = new JsonArray();
+            // Usar el primer ingrediente para buscar en TheMealDB
+            String firstIngredient = ingredientsEn.split(",")[0].trim();
+            String encoded = URLEncoder.encode(firstIngredient, StandardCharsets.UTF_8.toString());
+            String url = "https://www.themealdb.com/api/json/v1/1/filter.php?i=" + encoded;
 
-                for(JsonElement var12 : var9) {
-                    JsonObject var13 = var12.getAsJsonObject();
-                    JsonObject var14 = new JsonObject();
-                    var14.addProperty("id", var13.get("id").getAsInt());
-                    var14.addProperty("name", var13.get("title").getAsString());
-                    var10.add(var14);
+            HttpRequest httpRequest = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+            HttpResponse<String> httpResponse = this.httpClient.send(httpRequest, BodyHandlers.ofString());
+
+            if (httpResponse.statusCode() == 200) {
+                JsonObject body = this.gson.fromJson(httpResponse.body(), JsonObject.class);
+                JsonArray meals = body.has("meals") && !body.get("meals").isJsonNull()
+                        ? body.getAsJsonArray("meals") : new JsonArray();
+
+                JsonArray recipesArray = new JsonArray();
+                int count = 0;
+                for (JsonElement el : meals) {
+                    if (count >= 3) break;
+                    JsonObject meal = el.getAsJsonObject();
+                    JsonObject rec = new JsonObject();
+                    rec.addProperty("id", Integer.parseInt(meal.get("idMeal").getAsString()));
+                    rec.addProperty("name", meal.get("strMeal").getAsString());
+                    recipesArray.add(rec);
+                    count++;
                 }
 
-                JsonObject var16 = new JsonObject();
-                var16.addProperty("userIngredients", var4);
-                var16.add("recipes", var10);
-                var3.setPerformative(7);
-                var3.setContent(var16.toString());
+                JsonObject result = new JsonObject();
+                result.addProperty("userIngredients", ingredientsEn);
+                result.add("recipes", recipesArray);
+                reply.setPerformative(ACLMessage.INFORM);
+                reply.setContent(result.toString());
             } else {
-                var3.setPerformative(6);
-                var3.setContent("{\"error\": \"Failed to retrieve recipes. Status: " + var8.statusCode() + "\"}");
+                reply.setPerformative(ACLMessage.FAILURE);
+                reply.setContent("{\"error\": \"TheMealDB status: " + httpResponse.statusCode() + "\"}");
             }
-        } catch (Exception var15) {
-            var15.printStackTrace();
-            var3.setPerformative(6);
-            var3.setContent("{\"error\": \"Error communicating with Spoonacular API.\"}");
+        } catch (Exception e) {
+            e.printStackTrace();
+            reply.setPerformative(ACLMessage.FAILURE);
+            reply.setContent("{\"error\": \"Error comunicando con TheMealDB: " + e.getMessage() + "\"}");
         }
 
-        return var3;
+        return reply;
     }
 }

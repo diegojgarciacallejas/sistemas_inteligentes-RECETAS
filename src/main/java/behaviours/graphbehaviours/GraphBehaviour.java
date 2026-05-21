@@ -29,9 +29,14 @@ public class GraphBehaviour extends CyclicBehaviour {
             System.out.println("GraphAgent recibe:");
             System.out.println(msg.getContent());
 
-            List<GraphNode> graphNodes = processGraph(msg.getContent());
+            String fullInput = msg.getContent();
+            List<GraphNode> graphNodes = processGraph(fullInput);
 
-            String result = buildOutputMessage(graphNodes);
+            // Extraer líneas extra (instrucciones, TF-IDF scores) para pasarlas al RecommendationAgent
+            String instructionsLine   = extractPassthroughLine(fullInput, "recipeInstructions=");
+            String tfidfLine          = extractPassthroughLine(fullInput, "recipeTfIdfScores=");
+
+            String result = buildOutputMessage(graphNodes, instructionsLine, tfidfLine);
 
             ACLMessage message = new ACLMessage(ACLMessage.INFORM);
             message.addReceiver(new AID("RecommendationAgent", AID.ISLOCALNAME));
@@ -155,17 +160,26 @@ public class GraphBehaviour extends CyclicBehaviour {
         return graphNodes;
     }
 
-    private String buildOutputMessage(List<GraphNode> graphNodes) {
-
+    private String buildOutputMessage(List<GraphNode> graphNodes,
+                                      String instructionsLine,
+                                      String tfidfLine) {
         StringBuilder result = new StringBuilder();
-
         result.append("graphResults=\n");
-
         for (GraphNode node : graphNodes) {
             result.append(node.toMessageFormat()).append("\n");
         }
-
+        // Pasar las líneas de instrucciones y TF-IDF al RecommendationAgent
+        if (!instructionsLine.isEmpty()) result.append(instructionsLine).append("\n");
+        if (!tfidfLine.isEmpty())        result.append(tfidfLine).append("\n");
         return result.toString();
+    }
+
+    /** Extrae la primera línea del mensaje que empiece con el prefijo dado. */
+    private String extractPassthroughLine(String input, String prefix) {
+        for (String line : input.split("\n")) {
+            if (line.startsWith(prefix)) return line;
+        }
+        return "";
     }
 
     private String normalize(String text) {

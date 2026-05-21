@@ -7,15 +7,26 @@ public class RecipeScore {
     private String recipeName;
     private double graphScore;
     private double finalScore;
+    private String instructions;
 
     public RecipeScore(
             String recipeName,
             double graphScore,
             double finalScore
     ) {
+        this(recipeName, graphScore, finalScore, "");
+    }
+
+    public RecipeScore(
+            String recipeName,
+            double graphScore,
+            double finalScore,
+            String instructions
+    ) {
         this.recipeName = recipeName;
         this.graphScore = graphScore;
         this.finalScore = finalScore;
+        this.instructions = instructions != null ? instructions : "";
     }
 
     public String getRecipeName() {
@@ -28,6 +39,10 @@ public class RecipeScore {
 
     public double getFinalScore() {
         return finalScore;
+    }
+
+    public String getInstructions() {
+        return instructions;
     }
 
     @Override

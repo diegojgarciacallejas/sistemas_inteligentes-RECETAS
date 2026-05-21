@@ -9,6 +9,7 @@ import jade.lang.acl.MessageTemplate;
 import model.RecipeScore;
 
 import java.util.*;
+import java.util.LinkedHashMap;
 
 public class RecommendationBehaviour extends CyclicBehaviour {
 
@@ -49,11 +50,16 @@ public class RecommendationBehaviour extends CyclicBehaviour {
 
         List<RecipeScore> results = new ArrayList<>();
 
+        // Parsear instrucciones: recipeInstructions=RecipeName:pasos...
+        Map<String, String> instructions = parseInstructions(graphResult);
+
         String[] lines = graphResult.split("\n");
 
         for (String line : lines) {
 
             if (line.startsWith("graphResults=")
+                    || line.startsWith("recipeInstructions=")
+                    || line.startsWith("recipeTfIdfScores=")
                     || line.trim().isEmpty()) {
                 continue;
             }
@@ -62,15 +68,14 @@ public class RecommendationBehaviour extends CyclicBehaviour {
 
             double graphScore = extractGraphScore(line);
 
-            double finalScore =
-                    calculateFinalScore(graphScore);
+            double finalScore = calculateFinalScore(graphScore);
 
-            RecipeScore recipeScore =
-                    new RecipeScore(
-                            recipeName,
-                            graphScore,
-                            finalScore
-                    );
+            RecipeScore recipeScore = new RecipeScore(
+                    recipeName,
+                    graphScore,
+                    finalScore,
+                    instructions.getOrDefault(recipeName, "")
+            );
 
             results.add(recipeScore);
         }
@@ -82,6 +87,29 @@ public class RecommendationBehaviour extends CyclicBehaviour {
         );
 
         return results;
+    }
+
+    /**
+     * Parsea la línea recipeInstructions=RecipeA:pasos;RecipeB:pasos
+     * y devuelve un mapa recipeName → instrucciones.
+     */
+    private Map<String, String> parseInstructions(String input) {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (String line : input.split("\n")) {
+            if (!line.startsWith("recipeInstructions=")) continue;
+            String value = line.substring("recipeInstructions=".length());
+            // Cada receta separada por ';', pero las instrucciones pueden contener ':'
+            // Formato: RecipeName:instrucciones;OtraReceta:instrucciones
+            for (String entry : value.split(";")) {
+                int colon = entry.indexOf(":");
+                if (colon > 0) {
+                    String name  = entry.substring(0, colon).trim();
+                    String steps = entry.substring(colon + 1).trim();
+                    map.put(name, steps);
+                }
+            }
+        }
+        return map;
     }
 
     private double extractGraphScore(String line) {
@@ -139,6 +167,12 @@ public class RecommendationBehaviour extends CyclicBehaviour {
                     .append(" | explanation=")
                     .append(buildExplanation(recipe))
                     .append("\n");
+
+            // Añadir instrucciones si existen
+            String steps = recipe.getInstructions();
+            if (steps != null && !steps.isBlank()) {
+                sb.append("   instrucciones=").append(steps).append("\n");
+            }
 
             position++;
         }

@@ -1,4 +1,4 @@
-package main.java.behaviours.nutritionbehaviours;
+package behaviours.nutritionbehaviours;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
