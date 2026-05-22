@@ -5,11 +5,27 @@ import jade.core.Agent;
 import jade.core.behaviours.CyclicBehaviour;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
-
 import model.GraphNode;
 
 import java.util.*;
 
+/**
+ * GraphBehaviour — análisis de grafo bipartito ingrediente-receta.
+ *
+ * Escucha ONTOLOGY_RESULT y construye un grafo bipartito donde:
+ *   - Nodos izquierda : ingredientes del usuario
+ *   - Nodos derecha   : ingredientes de cada receta
+ *   - Aristas         : coincidencias directas (tras stemming)
+ *
+ * Métricas calculadas por receta:
+ *   coverageScore    = matches / totalIngredientesReceta
+ *                      (¿qué % de la receta puedo cubrir?)
+ *   utilizationScore = ingredientesUsuarioUsados / totalIngredientesUsuario
+ *                      (¿qué % de mis ingredientes usa esta receta?)
+ *   graphScore       = 0.65 * coverageScore + 0.35 * utilizationScore
+ *
+ * Reenvía a RecommendationAgent con conversationId GRAPH_RESULT.
+ */
 public class GraphBehaviour extends CyclicBehaviour {
 
     public GraphBehaviour(Agent agent) {
@@ -18,37 +34,45 @@ public class GraphBehaviour extends CyclicBehaviour {
 
     @Override
     public void action() {
-
-        MessageTemplate template =
-                MessageTemplate.MatchConversationId("ONTOLOGY_RESULT");
-
+        MessageTemplate template = MessageTemplate.MatchConversationId("ONTOLOGY_RESULT");
         ACLMessage msg = myAgent.receive(template);
 
         if (msg != null) {
-
             System.out.println("GraphAgent recibe:");
             System.out.println(msg.getContent());
 
-            // Extraer líneas de metadatos para reenviarlas a RecommendationAgent
-            String timesLine    = "";
-            String servingsLine = "";
-            String tagsLine     = "";
-            for (String line : msg.getContent().split("\n")) {
-                if (line.startsWith("recipeTimes="))       timesLine    = line;
-                else if (line.startsWith("recipeServings=")) servingsLine = line;
-                else if (line.startsWith("recipeTags="))    tagsLine     = line;
+            String fullInput = msg.getContent();
+
+            List<String>              userIngredients     = new ArrayList<>();
+            Map<String, List<String>> recipeIngredientsMap = new LinkedHashMap<>();
+            String                    instructionsLine    = "";
+            String                    tfidfLine           = "";
+
+            for (String line : fullInput.split("\n")) {
+                if (line.startsWith("userIngredients=")) {
+                    for (String raw : line.substring("userIngredients=".length()).split(",")) {
+                        String s = stem(raw.trim().toLowerCase());
+                        if (!s.isEmpty()) userIngredients.add(s);
+                    }
+                } else if (line.startsWith("recipes=")) {
+                    parseRecipesLine(line.substring("recipes=".length()), recipeIngredientsMap);
+                } else if (line.startsWith("recipeInstructions=")) {
+                    instructionsLine = line;
+                } else if (line.startsWith("recipeTfIdfScores=")) {
+                    tfidfLine = line;
+                }
             }
 
-            List<GraphNode> graphNodes = processGraph(msg.getContent());
+            List<GraphNode> nodes = buildGraph(userIngredients, recipeIngredientsMap);
+            logGraph(userIngredients, nodes);
 
-            String result = buildOutputMessage(graphNodes, timesLine, servingsLine, tagsLine);
+            String result = buildOutputMessage(nodes, instructionsLine, tfidfLine);
 
-            ACLMessage message = new ACLMessage(ACLMessage.INFORM);
-            message.addReceiver(new AID("RecommendationAgent", AID.ISLOCALNAME));
-            message.setConversationId("GRAPH_RESULT");
-            message.setContent(result);
-
-            myAgent.send(message);
+            ACLMessage forward = new ACLMessage(ACLMessage.INFORM);
+            forward.addReceiver(new AID("RecommendationAgent", AID.ISLOCALNAME));
+            forward.setConversationId("GRAPH_RESULT");
+            forward.setContent(result);
+            myAgent.send(forward);
 
             System.out.println("GraphAgent envía a RecommendationAgent:");
             System.out.println(result);
@@ -58,134 +82,114 @@ public class GraphBehaviour extends CyclicBehaviour {
         }
     }
 
-    private List<GraphNode> processGraph(String input) {
+    // ── Parsing ──────────────────────────────────────────────────────────────
 
-        List<String> userIngredients = new ArrayList<>();
-        Map<String, List<String>> recipeGraph = new LinkedHashMap<>();
+    private void parseRecipesLine(String text, Map<String, List<String>> out) {
+        for (String entry : text.split(";")) {
+            String[] parts = entry.split(":", 2);
+            if (parts.length != 2) continue;
+            String name = parts[0].trim();
+            List<String> ings = new ArrayList<>();
+            for (String raw : parts[1].split(",")) {
+                String s = stem(raw.trim().toLowerCase());
+                if (!s.isEmpty()) ings.add(s);
+            }
+            out.put(name, ings);
+        }
+    }
 
-        String[] lines = input.split("\n");
+    // ── Construcción del grafo bipartito ─────────────────────────────────────
 
-        for (String line : lines) {
+    private List<GraphNode> buildGraph(List<String> userIngredients,
+                                       Map<String, List<String>> recipeIngredientsMap) {
+        Set<String> userIngSet  = new HashSet<>(userIngredients);
+        int         totalUser   = Math.max(1, userIngredients.size());
 
-            if (line.startsWith("userIngredients=")) {
-
-                String ingredientsText = line.replace("userIngredients=", "");
-                userIngredients = parseList(ingredientsText);
-
-            } else if (line.startsWith("recipes=")) {
-
-                String recipesText = line.replace("recipes=", "");
-                recipeGraph = parseRecipes(recipesText);
+        // Grafo inverso: ingrediente → recetas que lo usan (para análisis de conectividad)
+        Map<String, List<String>> ingredientToRecipes = new HashMap<>();
+        for (Map.Entry<String, List<String>> e : recipeIngredientsMap.entrySet()) {
+            for (String ing : e.getValue()) {
+                ingredientToRecipes.computeIfAbsent(ing, k -> new ArrayList<>()).add(e.getKey());
             }
         }
 
-        return calculateGraphNodes(userIngredients, recipeGraph);
-    }
+        List<GraphNode> nodes = new ArrayList<>();
 
-    private List<String> parseList(String text) {
+        for (Map.Entry<String, List<String>> entry : recipeIngredientsMap.entrySet()) {
+            String       recipeName = entry.getKey();
+            List<String> recipeIngs = entry.getValue();
+            int          totalRecipe = Math.max(1, recipeIngs.size());
 
-        List<String> result = new ArrayList<>();
+            List<String> matched = new ArrayList<>();
+            List<String> missing = new ArrayList<>();
 
-        String[] parts = text.split(",");
-
-        for (String part : parts) {
-            result.add(normalize(part));
-        }
-
-        return result;
-    }
-
-    private Map<String, List<String>> parseRecipes(String text) {
-
-        Map<String, List<String>> recipes = new LinkedHashMap<>();
-
-        String[] recipeParts = text.split(";");
-
-        for (String recipePart : recipeParts) {
-
-            String[] data = recipePart.split(":");
-
-            if (data.length == 2) {
-
-                String recipeName = data[0].trim();
-                List<String> ingredients = parseList(data[1]);
-
-                recipes.put(recipeName, ingredients);
-            }
-        }
-
-        return recipes;
-    }
-
-    private List<GraphNode> calculateGraphNodes(
-            List<String> userIngredients,
-            Map<String, List<String>> recipeGraph
-    ) {
-
-        List<GraphNode> graphNodes = new ArrayList<>();
-
-        for (Map.Entry<String, List<String>> entry : recipeGraph.entrySet()) {
-
-            String recipeName = entry.getKey();
-            List<String> recipeIngredients = entry.getValue();
-
-            List<String> matchedIngredients = new ArrayList<>();
-            List<String> missingIngredients = new ArrayList<>();
-
-            for (String ingredient : recipeIngredients) {
-
-                if (userIngredients.contains(ingredient)) {
-                    matchedIngredients.add(ingredient);
+            for (String ing : recipeIngs) {
+                if (userIngSet.contains(ing)) {
+                    matched.add(ing);
                 } else {
-                    missingIngredients.add(ingredient);
+                    missing.add(ing);
                 }
             }
 
-            int matches = matchedIngredients.size();
+            // ── Métricas del grafo ──────────────────────────────────────────
+            double coverageScore = (double) matched.size() / totalRecipe;
 
-            double graphScore = 0.0;
+            long utilized = userIngredients.stream()
+                    .filter(recipeIngs::contains)
+                    .count();
+            double utilizationScore = (double) utilized / totalUser;
 
-            if (!recipeIngredients.isEmpty()) {
-                graphScore = (double) matches / recipeIngredients.size();
-            }
+            double graphScore = 0.65 * coverageScore + 0.35 * utilizationScore;
 
-            GraphNode node = new GraphNode(
-                    recipeName,
-                    recipeIngredients,
-                    matchedIngredients,
-                    missingIngredients,
-                    matches,
-                    recipeIngredients.size(),
-                    graphScore
-            );
-
-            graphNodes.add(node);
+            nodes.add(new GraphNode(
+                    recipeName, recipeIngs, matched, missing,
+                    matched.size(), recipeIngs.size(),
+                    graphScore, coverageScore, utilizationScore
+            ));
         }
 
-        return graphNodes;
+        return nodes;
     }
 
-    private String buildOutputMessage(List<GraphNode> graphNodes,
-                                      String timesLine,
-                                      String servingsLine,
-                                      String tagsLine) {
+    // ── Salida ───────────────────────────────────────────────────────────────
 
-        StringBuilder result = new StringBuilder();
-
-        result.append("graphResults=\n");
-
-        for (GraphNode node : graphNodes) {
-            result.append(node.toMessageFormat()).append("\n");
+    private String buildOutputMessage(List<GraphNode> nodes,
+                                      String instructionsLine,
+                                      String tfidfLine) {
+        StringBuilder sb = new StringBuilder("graphResults=\n");
+        for (GraphNode node : nodes) {
+            sb.append(node.toMessageFormat()).append("\n");
         }
-
-        if (!timesLine.isEmpty())    result.append(timesLine).append("\n");
-        if (!servingsLine.isEmpty()) result.append(servingsLine).append("\n");
-        if (!tagsLine.isEmpty())     result.append(tagsLine).append("\n");
-
-        return result.toString();
+        if (!instructionsLine.isEmpty()) sb.append(instructionsLine).append("\n");
+        if (!tfidfLine.isEmpty())        sb.append(tfidfLine).append("\n");
+        return sb.toString();
     }
 
-    private String normalize(String text) {
-        return text.trim().toLowerCase();
+    private void logGraph(List<String> userIngredients, List<GraphNode> nodes) {
+        System.out.println("GraphAgent: ingredientes usuario = " + userIngredients);
+        for (GraphNode n : nodes) {
+            System.out.printf("  %-35s coverage=%.2f  utilization=%.2f  graph=%.2f%n",
+                    n.getRecipeName(),
+                    n.getCoverageScore(),
+                    n.getUtilizationScore(),
+                    n.getGraphScore());
+        }
+    }
+
+    // ── Stemmer (coincide con OntologyProcessor para uniformidad) ────────────
+
+    private String stem(String word) {
+        if (word == null || word.isEmpty()) return "";
+        if (word.contains(" ")) return word;
+        int len = word.length();
+        if (len > 3 && word.endsWith("ies")) return word.substring(0, len - 3) + "y";
+        if (len > 4 && word.endsWith("oes")) return word.substring(0, len - 2);
+        if (len > 3 && word.endsWith("s")
+                && !word.endsWith("ss")
+                && !word.endsWith("us")
+                && !word.endsWith("is")
+                && !word.endsWith("as"))
+            return word.substring(0, len - 1);
+        return word;
     }
 }

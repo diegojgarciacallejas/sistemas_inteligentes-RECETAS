@@ -5,13 +5,27 @@ import jade.core.Agent;
 import jade.core.behaviours.CyclicBehaviour;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
-
 import model.RecipeScore;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
+/**
+ * RecommendationBehaviour — agente de puntuación y ranking final.
+ *
+ * Escucha GRAPH_RESULT y calcula el score final combinando:
+ *   coverageScore    (0.50) — % ingredientes de la receta cubiertos por el usuario
+ *   utilizationScore (0.20) — % ingredientes del usuario que usa la receta
+ *   tfidfScore       (0.30) — similitud textual TF-IDF (normalizada al rango [0,1])
+ *
+ * Salida a InterfaceAgent (RECOMMENDATION_RESULT):
+ *   Una línea por receta en formato pipe compatible con InterfaceAgent.displayResults():
+ *     rank|recipeName|graphScore|finalScore
+ *   Seguida de líneas de detalle (mostradas como texto libre en la GUI).
+ */
 public class RecommendationBehaviour extends CyclicBehaviour {
+
+    // Factor de escala para normalizar scores TF-IDF coseno (típicamente bajos)
+    private static final double TFIDF_SCALE = 5.0;
 
     public RecommendationBehaviour(Agent agent) {
         super(agent);
@@ -19,195 +33,180 @@ public class RecommendationBehaviour extends CyclicBehaviour {
 
     @Override
     public void action() {
-
-        MessageTemplate template =
-                MessageTemplate.MatchConversationId("GRAPH_RESULT");
-
+        MessageTemplate template = MessageTemplate.MatchConversationId("GRAPH_RESULT");
         ACLMessage msg = myAgent.receive(template);
 
         if (msg != null) {
-
             System.out.println("RecommendationAgent recibió:");
             System.out.println(msg.getContent());
 
-            List<RecipeScore> ranking =
-                    calculateRanking(msg.getContent());
+            List<RecipeScore> ranking = calculateRanking(msg.getContent());
+            String output = buildRankingMessage(ranking);
 
-            String rankingMessage =
-                    buildRankingMessage(ranking);
+            System.out.println("Ranking final:");
+            System.out.println(output);
 
-            System.out.println("Ranking final calculado:");
-            System.out.println(rankingMessage);
-
-            sendRankingToInterface(rankingMessage);
-
+            sendToInterface(output);
         } else {
             block();
         }
     }
 
-    private List<RecipeScore> calculateRanking(String graphResult) {
+    // ── Cálculo del ranking ───────────────────────────────────────────────────
 
-        // Primera pasada: parsear metadatos de tiempo y etiquetas
-        Map<String, Integer>     recipeTimes = new HashMap<>();
-        Map<String, Set<String>> recipeTags  = new HashMap<>();
+    private List<RecipeScore> calculateRanking(String input) {
+        Map<String, Double> tfidfScores  = parseTfidfScores(input);
+        Map<String, String> instructions = parseInstructions(input);
 
-        for (String line : graphResult.split("\n")) {
-
-            if (line.startsWith("recipeTimes=")) {
-                for (String entry : line.replace("recipeTimes=", "").split(";")) {
-                    String[] kv = entry.split(":");
-                    if (kv.length == 2) {
-                        try { recipeTimes.put(kv[0].trim(), Integer.parseInt(kv[1].trim())); }
-                        catch (NumberFormatException ignored) {}
-                    }
-                }
-
-            } else if (line.startsWith("recipeTags=")) {
-                for (String entry : line.replace("recipeTags=", "").split(";")) {
-                    String[] kv = entry.split(":", 2);
-                    if (kv.length == 2) {
-                        Set<String> tags = Arrays.stream(kv[1].split(","))
-                                .map(String::trim)
-                                .filter(t -> !t.isEmpty())
-                                .collect(Collectors.toSet());
-                        recipeTags.put(kv[0].trim(), tags);
-                    }
-                }
-            }
-        }
-
-        // Segunda pasada: procesar líneas de recetas
         List<RecipeScore> results = new ArrayList<>();
 
-        for (String line : graphResult.split("\n")) {
-
+        for (String line : input.split("\n")) {
             if (line.startsWith("graphResults=")
-                    || line.startsWith("recipeTimes=")
-                    || line.startsWith("recipeServings=")
-                    || line.startsWith("recipeTags=")
+                    || line.startsWith("recipeInstructions=")
+                    || line.startsWith("recipeTfIdfScores=")
                     || line.trim().isEmpty()) {
                 continue;
             }
 
-            String recipeName = line.split(";")[0];
-            double graphScore = extractGraphScore(line);
-            int    timeMinutes = recipeTimes.getOrDefault(recipeName, -1);
-            Set<String> tags  = recipeTags.getOrDefault(recipeName, Collections.emptySet());
+            // Formato: RecipeName;graphScore=X;coverageScore=Y;utilizationScore=Z;matches=N;total=M;...
+            String[] parts = line.split(";");
+            if (parts.length < 3) continue;
 
-            double finalScore = calculateFinalScore(graphScore, timeMinutes, tags);
+            String recipeName       = parts[0].trim();
+            double graphScore       = parseField(parts, "graphScore");
+            double coverageScore    = parseField(parts, "coverageScore");
+            double utilizationScore = parseField(parts, "utilizationScore");
 
-            results.add(new RecipeScore(recipeName, graphScore, finalScore));
+            double rawTfidf   = tfidfScores.getOrDefault(recipeName, 0.0);
+            double tfidfNorm  = Math.min(1.0, rawTfidf * TFIDF_SCALE);
+
+            double finalScore = 0.50 * coverageScore
+                              + 0.20 * utilizationScore
+                              + 0.30 * tfidfNorm;
+
+            results.add(new RecipeScore(
+                    recipeName,
+                    graphScore,
+                    coverageScore,
+                    utilizationScore,
+                    rawTfidf,
+                    finalScore,
+                    instructions.getOrDefault(recipeName, "")
+            ));
         }
 
         results.sort(Comparator.comparingDouble(RecipeScore::getFinalScore).reversed());
-
         return results;
     }
 
-    private double extractGraphScore(String line) {
+    // ── Construcción del mensaje de salida ────────────────────────────────────
 
-        String[] parts = line.split(";");
-
-        for (String part : parts) {
-
-            if (part.startsWith("graphScore=")) {
-
-                String value =
-                        part.replace("graphScore=", "");
-
-                value = value.replace(",", ".");
-
-                return Double.parseDouble(value);
-            }
-        }
-
-        return 0.0;
-    }
-
-    /**
-     * Score final ponderado:
-     *   45% graphScore       — coincidencia de ingredientes (dato real del grafo)
-     *   20% quantity         — sin datos propagados aún → constante 0.80
-     *   15% preference       — sin datos propagados aún → constante 0.70
-     *   10% timeScore        — basado en readyInMinutes real de Spoonacular
-     *   10% nutritionScore   — basado en etiquetas dietéticas reales (vegan, glutenFree…)
-     */
-    private double calculateFinalScore(double graphScore, int timeMinutes, Set<String> tags) {
-
-        // 1.0 si ≤ 20 min, decrece linealmente hasta 0.0 a los 120 min
-        double timeScore = (timeMinutes > 0)
-                ? Math.max(0.0, 1.0 - (timeMinutes - 20.0) / 100.0)
-                : 0.70;
-
-        // Cada etiqueta dietética suma 0.25 (vegan, vegetarian, glutenFree, dairyFree)
-        double nutritionScore = Math.min(1.0, 0.25 + tags.size() * 0.25);
-
-        return 0.45 * graphScore
-                + 0.20 * 0.80
-                + 0.15 * 0.70
-                + 0.10 * timeScore
-                + 0.10 * nutritionScore;
-    }
-
-    /**
-     * Formato: RANK|nombre|graphScore|finalScore|explicacion
-     * InterfaceAgent parsea las columnas 0-3 separadas por '|'.
-     */
     private String buildRankingMessage(List<RecipeScore> ranking) {
-
         StringBuilder sb = new StringBuilder();
 
-        sb.append("recommendationResults=\n");
+        int pos = 1;
+        for (RecipeScore r : ranking) {
+            // Línea principal: formato pipe que InterfaceAgent.displayResults() sabe parsear
+            // Patrón esperado: \\d+\\|.*  con parts[0]=rank, [1]=nombre, [2]=graphScore, [3]=finalScore
+            sb.append(pos)
+              .append("|").append(r.getRecipeName())
+              .append("|").append(String.format(Locale.US, "%.4f", r.getGraphScore()))
+              .append("|").append(String.format(Locale.US, "%.4f", r.getFinalScore()))
+              .append("\n");
 
-        int position = 1;
+            // Líneas de detalle (texto libre, visible en la GUI bajo el bloque de scores)
+            sb.append("  Cobertura: ")
+              .append(String.format(Locale.US, "%.0f%%", r.getCoverageScore() * 100))
+              .append("  |  Aprovechamiento: ")
+              .append(String.format(Locale.US, "%.0f%%", r.getUtilizationScore() * 100))
+              .append("  |  TF-IDF: ")
+              .append(String.format(Locale.US, "%.4f", r.getTfidfScore()))
+              .append("\n");
 
-        for (RecipeScore recipe : ranking) {
+            sb.append("  ").append(buildExplanation(r)).append("\n");
 
-            sb.append(position)
-                    .append("|")
-                    .append(recipe.getRecipeName())
-                    .append("|")
-                    .append(String.format(Locale.US, "%.2f", recipe.getGraphScore()))
-                    .append("|")
-                    .append(String.format(Locale.US, "%.2f", recipe.getFinalScore()))
-                    .append("|")
-                    .append(buildExplanation(recipe))
-                    .append("\n");
+            String steps = r.getInstructions();
+            if (steps != null && !steps.isBlank()) {
+                String preview = steps.length() > 200
+                        ? steps.substring(0, 200).trim() + "..."
+                        : steps;
+                sb.append("  Pasos: ").append(preview).append("\n");
+            }
 
-            position++;
+            sb.append("\n");
+            pos++;
         }
 
         return sb.toString();
     }
 
-    private String buildExplanation(RecipeScore recipe) {
-
-        if (recipe.getGraphScore() >= 0.65) {
-            return "Muy recomendada porque coincide con la mayoría de ingredientes disponibles.";
-        }
-
-        if (recipe.getGraphScore() >= 0.30) {
-            return "Recomendación aceptable porque comparte algunos ingredientes con el usuario.";
-        }
-
-        return "Recomendación débil porque apenas coincide con los ingredientes disponibles.";
+    private String buildExplanation(RecipeScore r) {
+        if (r.getCoverageScore() >= 0.65)
+            return "Muy recomendada: cubres más del 65% de los ingredientes necesarios.";
+        if (r.getCoverageScore() >= 0.30)
+            return "Recomendación aceptable: compartes algunos ingredientes clave.";
+        return "Recomendación débil: faltan bastantes ingredientes de esta receta.";
     }
 
-    private void sendRankingToInterface(String rankingMessage) {
+    // ── Envío a InterfaceAgent ────────────────────────────────────────────────
 
+    private void sendToInterface(String rankingMessage) {
         ACLMessage response = new ACLMessage(ACLMessage.INFORM);
-
-        response.addReceiver(
-                new AID("InterfaceAgent", AID.ISLOCALNAME)
-        );
-
+        response.addReceiver(new AID("InterfaceAgent", AID.ISLOCALNAME));
         response.setConversationId("RECOMMENDATION_RESULT");
-
         response.setContent(rankingMessage);
-
         myAgent.send(response);
+        System.out.println("RecommendationAgent: ranking enviado a InterfaceAgent.");
+    }
 
-        System.out.println("RecommendationAgent envió ranking a InterfaceAgent");
+    // ── Parsers de líneas passthrough ─────────────────────────────────────────
+
+    private Map<String, Double> parseTfidfScores(String input) {
+        Map<String, Double> scores = new LinkedHashMap<>();
+        for (String line : input.split("\n")) {
+            if (!line.startsWith("recipeTfIdfScores=")) continue;
+            String value = line.substring("recipeTfIdfScores=".length());
+            for (String entry : value.split(";")) {
+                String[] kv = entry.split(":");
+                if (kv.length == 2) {
+                    try {
+                        scores.put(kv[0].trim(),
+                                Double.parseDouble(kv[1].trim().replace(",", ".")));
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        return scores;
+    }
+
+    private Map<String, String> parseInstructions(String input) {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (String line : input.split("\n")) {
+            if (!line.startsWith("recipeInstructions=")) continue;
+            String value = line.substring("recipeInstructions=".length());
+            // Instrucciones tienen ';' reemplazado por ',' (TextMiningBehaviour), así que
+            // split por ';' separa recetas; luego indexOf(':') separa nombre de pasos.
+            for (String entry : value.split(";")) {
+                int colon = entry.indexOf(":");
+                if (colon > 0) {
+                    map.put(entry.substring(0, colon).trim(),
+                            entry.substring(colon + 1).trim());
+                }
+            }
+        }
+        return map;
+    }
+
+    private double parseField(String[] parts, String fieldName) {
+        String prefix = fieldName + "=";
+        for (String part : parts) {
+            if (part.startsWith(prefix)) {
+                try {
+                    return Double.parseDouble(
+                            part.substring(prefix.length()).replace(",", "."));
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        return 0.0;
     }
 }

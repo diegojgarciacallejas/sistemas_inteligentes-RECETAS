@@ -5,73 +5,62 @@ import java.util.Locale;
 
 public class GraphNode {
 
-    private String recipeName;
+    private final String       recipeName;
+    private final List<String> ingredients;
+    private final List<String> matchedIngredients;
+    private final List<String> missingIngredients;
+    private final int          matches;
+    private final int          totalIngredients;
+    private final double       graphScore;
+    private final double       coverageScore;
+    private final double       utilizationScore;
 
-    private List<String> ingredients;
-
-    private List<String> matchedIngredients;
-    private List<String> missingIngredients;
-
-    private int matches;
-    private int totalIngredients;
-
-    private double graphScore;
-
-    public GraphNode(
-            String recipeName,
-            List<String> ingredients,
-            List<String> matchedIngredients,
-            List<String> missingIngredients,
-            int matches,
-            int totalIngredients,
-            double graphScore
-    ) {
-
-        this.recipeName = recipeName;
-        this.ingredients = ingredients;
-        this.matchedIngredients = matchedIngredients;
-        this.missingIngredients = missingIngredients;
-        this.matches = matches;
-        this.totalIngredients = totalIngredients;
-        this.graphScore = graphScore;
+    public GraphNode(String recipeName,
+                     List<String> ingredients,
+                     List<String> matchedIngredients,
+                     List<String> missingIngredients,
+                     int matches,
+                     int totalIngredients,
+                     double graphScore,
+                     double coverageScore,
+                     double utilizationScore) {
+        this.recipeName          = recipeName;
+        this.ingredients         = ingredients;
+        this.matchedIngredients  = matchedIngredients;
+        this.missingIngredients  = missingIngredients;
+        this.matches             = matches;
+        this.totalIngredients    = totalIngredients;
+        this.graphScore          = graphScore;
+        this.coverageScore       = coverageScore;
+        this.utilizationScore    = utilizationScore;
     }
 
-    public String getRecipeName() {
-        return recipeName;
-    }
+    public String       getRecipeName()         { return recipeName; }
+    public List<String> getIngredients()         { return ingredients; }
+    public List<String> getMatchedIngredients()  { return matchedIngredients; }
+    public List<String> getMissingIngredients()  { return missingIngredients; }
+    public int          getMatches()             { return matches; }
+    public int          getTotalIngredients()    { return totalIngredients; }
+    public double       getGraphScore()          { return graphScore; }
+    public double       getCoverageScore()       { return coverageScore; }
+    public double       getUtilizationScore()    { return utilizationScore; }
 
-    public List<String> getIngredients() {
-        return ingredients;
-    }
-
-    public List<String> getMatchedIngredients() {
-        return matchedIngredients;
-    }
-
-    public List<String> getMissingIngredients() {
-        return missingIngredients;
-    }
-
-    public int getMatches() {
-        return matches;
-    }
-
-    public int getTotalIngredients() {
-        return totalIngredients;
-    }
-
-    public double getGraphScore() {
-        return graphScore;
-    }
-
+    /**
+     * Serializa el nodo al formato de mensaje para RecommendationAgent.
+     * Campos separados por ';', listas de ingredientes separadas por ','.
+     *
+     * Formato:
+     *   RecipeName;graphScore=0.7200;coverageScore=0.8000;utilizationScore=0.5000;
+     *              matches=4;total=5;matched=chicken,rice;missing=garlic,onion
+     */
     public String toMessageFormat() {
-
         return recipeName
-                + ";ingredients=" + ingredients
-                + ";matched=" + matchedIngredients
-                + ";missing=" + missingIngredients
-                + ";matches=" + matches
-                + ";total=" + totalIngredients
-                + ";graphScore=" + String.format(Locale.US, "%.2f", graphScore);
+                + ";graphScore="        + String.format(Locale.US, "%.4f", graphScore)
+                + ";coverageScore="     + String.format(Locale.US, "%.4f", coverageScore)
+                + ";utilizationScore="  + String.format(Locale.US, "%.4f", utilizationScore)
+                + ";matches="           + matches
+                + ";total="             + totalIngredients
+                + ";matched="           + String.join(",", matchedIngredients)
+                + ";missing="           + String.join(",", missingIngredients);
     }
 }

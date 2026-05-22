@@ -36,8 +36,7 @@ public class InterfaceAgent extends Agent {
 
     // ── Campos de la GUI ──────────────────────────────────────────────────────
     JFrame             frame;
-    JTextField         tfIngredients;   // "arroz, pollo, huevo, tomate"
-    JTextField         tfQuantities;    // "arroz 200g, huevos 2, pollo 300g"
+    private final java.util.List<JTextField[]> ingredientRows = new java.util.ArrayList<>();
     JSpinner           spPersons;       // 1-10
     JSpinner           spMaxTime;       // minutos
     JTextField         tfRestrictions;  // "vegetariano, sin gluten"
@@ -119,21 +118,21 @@ public class InterfaceAgent extends Agent {
     // =========================================================================
 
     private void buildGUI() {
-        frame = new JFrame("🍽️ Recipe Recommender – InterfaceAgent");
+        frame = new JFrame("NUTRIAGENT");
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         frame.addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent e) { doDelete(); }
         });
-        frame.setSize(620, 700);
+        frame.setSize(750, 850);
         frame.setLocationRelativeTo(null);
         frame.setLayout(new BorderLayout(10, 10));
 
         // ── Panel de entrada ──────────────────────────────────────────────────
         JPanel inputPanel = new JPanel(new GridBagLayout());
         inputPanel.setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createEtchedBorder(), "Datos del usuario",
-                TitledBorder.LEFT, TitledBorder.TOP));
-        inputPanel.setBackground(new Color(250, 250, 245));
+                BorderFactory.createLineBorder(new Color(80, 160, 80), 1, true),
+                "Datos del usuario", TitledBorder.LEFT, TitledBorder.TOP));
+        inputPanel.setBackground(new Color(235, 245, 235));
 
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets  = new Insets(6, 8, 6, 8);
@@ -142,30 +141,78 @@ public class InterfaceAgent extends Agent {
 
         int row = 0;
 
-        tfIngredients = new JTextField("arroz, pollo, huevo, tomate");
-        addRow(inputPanel, gbc, row++, "1. Ingredientes disponibles:", tfIngredients);
+        JPanel ingredientsPanel = new JPanel();
+        ingredientsPanel.setLayout(new BoxLayout(ingredientsPanel, BoxLayout.Y_AXIS));
+        ingredientsPanel.setBackground(new Color(235, 245, 235));
 
-        tfQuantities = new JTextField("arroz 200g, huevos 2, pollo 300g");
-        addRow(inputPanel, gbc, row++, "2. Cantidades disponibles:", tfQuantities);
+        // Cabecera de columnas
+        JPanel header = new JPanel(new GridLayout(1, 3, 6, 0));
+        header.setBackground(new Color(235, 245, 235));
+        header.add(new JLabel("Ingrediente"));
+        header.add(new JLabel("Cantidad"));
+        header.add(new JLabel(""));
+        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+        ingredientsPanel.add(header);
+
+        // Botón añadir
+        JButton btnAdd = new JButton("+ Añadir ingrediente");
+        btnAdd.addActionListener(e -> {
+            addIngredientRow(ingredientsPanel, btnAdd, null, null);
+            ingredientsPanel.revalidate();
+            ingredientsPanel.repaint();
+        });
+
+        ingredientsPanel.add(btnAdd);
+
+        // Filas iniciales con valores por defecto
+        addIngredientRow(ingredientsPanel, btnAdd, "arroz",  "200g");
+        addIngredientRow(ingredientsPanel, btnAdd, "pollo",  "300g");
+        addIngredientRow(ingredientsPanel, btnAdd, "huevo",  "2 unidades");
+        addIngredientRow(ingredientsPanel, btnAdd, "tomate", "1");
+
+
+
+        // Añádelo al inputPanel ocupando las 2 columnas
+        gbc.gridy     = row++;
+        gbc.gridx     = 0;
+        gbc.gridwidth = 2;
+        gbc.fill      = GridBagConstraints.HORIZONTAL;
+        inputPanel.add(ingredientsPanel, gbc);
+        gbc.gridwidth = 1; // restaurar
 
         spPersons = new JSpinner(new SpinnerNumberModel(2, 1, 20, 1));
-        addRow(inputPanel, gbc, row++, "3. Número de personas:", spPersons);
-
         spMaxTime = new JSpinner(new SpinnerNumberModel(30, 5, 180, 5));
-        addRow(inputPanel, gbc, row++, "4. Tiempo máximo (minutos):", spMaxTime);
+
+        JPanel timePersonsPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 0));
+        timePersonsPanel.setBackground(new Color(235, 245, 235));
+        timePersonsPanel.add(new JLabel("Nº personas:"));
+        timePersonsPanel.add(spPersons);
+        timePersonsPanel.add(Box.createHorizontalStrut(60));
+        timePersonsPanel.add(new JLabel("Tiempo máximo (min):"));
+        timePersonsPanel.add(spMaxTime);
+
+        gbc.gridy     = row++;
+        gbc.gridx     = 0;
+        gbc.gridwidth = 2;
+        gbc.fill      = GridBagConstraints.HORIZONTAL;
+        inputPanel.add(timePersonsPanel, gbc);
+        gbc.gridwidth = 1;
 
         tfRestrictions = new JTextField("vegetariano, sin gluten");
-        addRow(inputPanel, gbc, row++, "5. Restricciones alimentarias:", tfRestrictions);
+        addRow(inputPanel, gbc, row++, "Restricciones alimentarias:", tfRestrictions);
 
         tfPreferences = new JTextField("rápido, saludable, sin horno");
-        addRow(inputPanel, gbc, row++, "6. Preferencias:", tfPreferences);
+        addRow(inputPanel, gbc, row++, "Preferencias:", tfPreferences);
 
         cbMealType = new JComboBox<>(new String[]{"cualquiera", "desayuno", "comida", "cena", "snack"});
-        addRow(inputPanel, gbc, row++, "7. Tipo de comida (opcional):", cbMealType);
+        addRow(inputPanel, gbc, row++, "Tipo de comida (opcional):", cbMealType);
 
         btnSearch = new JButton("🔍 Buscar recetas");
-        btnSearch.setBackground(new Color(70, 130, 180));
+        btnSearch.setBackground(new Color(80, 160, 80));
         btnSearch.setForeground(Color.WHITE);
+        btnSearch.setOpaque(true);
+        btnSearch.setBorderPainted(false);
+        btnSearch.setForeground(Color.BLACK);
         btnSearch.setFont(btnSearch.getFont().deriveFont(Font.BOLD, 13f));
         btnSearch.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btnSearch.addActionListener(e -> onSearchClicked());
@@ -183,7 +230,8 @@ public class InterfaceAgent extends Agent {
         taResults.setFont(new Font("Monospaced", Font.PLAIN, 12));
         JScrollPane scrollPane = new JScrollPane(taResults);
         scrollPane.setBorder(BorderFactory.createTitledBorder(
-                BorderFactory.createEtchedBorder(), "Resultados"));
+                BorderFactory.createLineBorder(new Color(80, 160, 80), 1, true),
+                "Resultados"));
 
         lblStatus = new JLabel("Listo.");
         lblStatus.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
@@ -194,6 +242,7 @@ public class InterfaceAgent extends Agent {
         frame.add(scrollPane, BorderLayout.CENTER);
         frame.add(lblStatus,  BorderLayout.SOUTH);
         frame.setVisible(true);
+        frame.setTitle("NUTRIAGENT");
     }
 
     /** Añade una fila etiqueta + componente al GridBagLayout. */
@@ -242,13 +291,24 @@ public class InterfaceAgent extends Agent {
      *   mealType=comida
      */
     String buildRequestContent() {
-        return "ingredients=" + tfIngredients.getText().trim() + "\n"
-             + "quantities="  + tfQuantities.getText().trim()  + "\n"
-             + "persons="     + spPersons.getValue()           + "\n"
-             + "maxTime="     + spMaxTime.getValue()           + "\n"
-             + "restrictions="+ tfRestrictions.getText().trim()+ "\n"
-             + "preferences=" + tfPreferences.getText().trim() + "\n"
-             + "mealType="    + cbMealType.getSelectedItem();
+        StringBuilder ingredients = new StringBuilder();
+        StringBuilder quantities  = new StringBuilder();
+        for (JTextField[] pair : ingredientRows) {
+            String n = pair[0].getText().trim();
+            String q = pair[1].getText().trim();
+            if (!n.isEmpty()) {
+                if (ingredients.length() > 0) { ingredients.append(","); quantities.append(","); }
+                ingredients.append(n);
+                quantities.append(n).append(" ").append(q);
+            }
+        }
+        return "ingredients=" + ingredients                    + "\n"
+                + "quantities="  + quantities                     + "\n"
+                + "persons="     + spPersons.getValue()           + "\n"
+                + "maxTime="     + spMaxTime.getValue()            + "\n"
+                + "restrictions="+ tfRestrictions.getText().trim() + "\n"
+                + "preferences=" + tfPreferences.getText().trim()  + "\n"
+                + "mealType="    + cbMealType.getSelectedItem();
     }
 
     // =========================================================================
@@ -314,6 +374,49 @@ public class InterfaceAgent extends Agent {
         int filled = (int) Math.round(score * 10);
         return "█".repeat(filled) + "░".repeat(10 - filled)
                 + String.format(" %.0f%%", score * 100);
+    }
+
+    private void addIngredientRow(JPanel panel, JButton btnAdd,
+                                  String name, String qty) {
+        JTextField tfName = new JTextField(name != null ? name : "");
+        JTextField tfQty  = new JTextField(qty  != null ? qty  : "");
+        JTextField[] pair = {tfName, tfQty};
+        ingredientRows.add(pair);
+
+        JPanel row = new JPanel(new GridLayout(1, 3, 12, 0));
+        row.setBorder(BorderFactory.createEmptyBorder(3, 0, 3, 0));
+        row.setBackground(new Color(235, 245, 235));
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+
+        JButton btnRemove = new JButton("✕");
+        btnRemove.setBackground(new Color(200, 50, 50));
+        btnRemove.setForeground(Color.WHITE);
+        btnRemove.setOpaque(true);
+        btnRemove.setBorder(BorderFactory.createLineBorder(new Color(160, 30, 30), 1, true));        btnRemove.setFocusPainted(false);
+        btnRemove.setFont(btnRemove.getFont().deriveFont(Font.BOLD, 12f));
+        btnRemove.setMargin(new Insets(2, 6, 2, 6));
+        btnRemove.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        btnRemove.addActionListener(e -> {
+            ingredientRows.remove(pair);
+            panel.remove(row);
+            panel.revalidate();
+            panel.repaint();
+        });
+
+        row.add(tfName);
+        row.add(tfQty);
+        JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
+        btnPanel.setBackground(new Color(235, 245, 235));
+        Dimension btnSize = new Dimension(33, 20);
+        btnRemove.setPreferredSize(btnSize);
+        btnRemove.setMinimumSize(btnSize);
+        btnRemove.setMaximumSize(btnSize);
+        btnPanel.add(btnRemove);
+        row.add(btnPanel);
+
+        // Insertar antes del botón "Añadir"
+        int idx = panel.getComponentCount() - 1;
+        panel.add(row, idx);
     }
 
     // =========================================================================
