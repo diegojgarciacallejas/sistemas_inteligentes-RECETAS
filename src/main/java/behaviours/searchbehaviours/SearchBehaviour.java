@@ -39,12 +39,19 @@ public class SearchBehaviour extends AchieveREResponder {
 
     protected ACLMessage prepareResultNotification(ACLMessage request, ACLMessage response) {
         ACLMessage reply = request.createReply();
-        String rawContent = request.getContent().trim();
+        String rawContent  = request.getContent().trim();
         String ingredients = rawContent;
+        int    maxTime     = -1;
+        String restrictions = "";
+
         for (String line : rawContent.split("\n")) {
             if (line.startsWith("ingredients=")) {
                 ingredients = line.substring("ingredients=".length()).trim();
-                break;
+            } else if (line.startsWith("maxTime=")) {
+                try { maxTime = Integer.parseInt(line.substring("maxTime=".length()).trim()); }
+                catch (NumberFormatException ignored) {}
+            } else if (line.startsWith("restrictions=")) {
+                restrictions = line.substring("restrictions=".length()).trim();
             }
         }
 
@@ -84,6 +91,8 @@ public class SearchBehaviour extends AchieveREResponder {
                 JsonObject result = new JsonObject();
                 result.addProperty("userIngredients", ingredientsEn);
                 result.add("recipes", recipesArray);
+                if (maxTime > 0)           result.addProperty("maxTime", maxTime);
+                if (!restrictions.isEmpty()) result.addProperty("restrictions", restrictions);
 
                 // Reenviar al pipeline: TextMiningAgent escucha RECIPE_SEARCH_RESULT
                 ACLMessage forward = new ACLMessage(ACLMessage.INFORM);

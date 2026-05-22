@@ -6,6 +6,7 @@ import jade.core.behaviours.CyclicBehaviour;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import model.GraphNode;
+import utils.IngredientStemmer;
 
 import java.util.*;
 
@@ -15,7 +16,7 @@ import java.util.*;
  * Escucha ONTOLOGY_RESULT y construye un grafo bipartito donde:
  *   - Nodos izquierda : ingredientes del usuario
  *   - Nodos derecha   : ingredientes de cada receta
- *   - Aristas         : coincidencias directas (tras stemming)
+ *   - Aristas         : coincidencias (exactas o genérico↔específico vía IngredientStemmer)
  *
  * Métricas calculadas por receta:
  *   coverageScore    = matches / totalIngredientesReceta
@@ -24,7 +25,9 @@ import java.util.*;
  *                      (¿qué % de mis ingredientes usa esta receta?)
  *   graphScore       = 0.65 * coverageScore + 0.35 * utilizationScore
  *
- * Reenvía a RecommendationAgent con conversationId GRAPH_RESULT.
+ * Reenvía a RecommendationAgent con conversationId GRAPH_RESULT,
+ * propagando también: recipeInstructions=, recipeTfIdfScores=,
+ *                     recipeTimes=, userPrefs=
  */
 public class GraphBehaviour extends CyclicBehaviour {
 
@@ -43,15 +46,17 @@ public class GraphBehaviour extends CyclicBehaviour {
 
             String fullInput = msg.getContent();
 
-            List<String>              userIngredients     = new ArrayList<>();
+            List<String>              userIngredients      = new ArrayList<>();
             Map<String, List<String>> recipeIngredientsMap = new LinkedHashMap<>();
-            String                    instructionsLine    = "";
-            String                    tfidfLine           = "";
+            String instructionsLine = "";
+            String tfidfLine        = "";
+            String timesLine        = "";
+            String userPrefsLine    = "";
 
             for (String line : fullInput.split("\n")) {
                 if (line.startsWith("userIngredients=")) {
                     for (String raw : line.substring("userIngredients=".length()).split(",")) {
-                        String s = stem(raw.trim().toLowerCase());
+                        String s = IngredientStemmer.stem(raw.trim().toLowerCase());
                         if (!s.isEmpty()) userIngredients.add(s);
                     }
                 } else if (line.startsWith("recipes=")) {
@@ -60,13 +65,20 @@ public class GraphBehaviour extends CyclicBehaviour {
                     instructionsLine = line;
                 } else if (line.startsWith("recipeTfIdfScores=")) {
                     tfidfLine = line;
+                } else if (line.startsWith("recipeTimes=")) {
+                    timesLine = line;
+                } else if (line.startsWith("userPrefs=")) {
+                    userPrefsLine = line;
                 }
+                // El resto de líneas (recipeIngredients=, recipeServings=, etc.)
+                // ya no son necesarias en este agente y se descartan aquí.
             }
 
             List<GraphNode> nodes = buildGraph(userIngredients, recipeIngredientsMap);
             logGraph(userIngredients, nodes);
 
-            String result = buildOutputMessage(nodes, instructionsLine, tfidfLine);
+            String result = buildOutputMessage(
+                    nodes, instructionsLine, tfidfLine, timesLine, userPrefsLine);
 
             ACLMessage forward = new ACLMessage(ACLMessage.INFORM);
             forward.addReceiver(new AID("RecommendationAgent", AID.ISLOCALNAME));
@@ -91,7 +103,7 @@ public class GraphBehaviour extends CyclicBehaviour {
             String name = parts[0].trim();
             List<String> ings = new ArrayList<>();
             for (String raw : parts[1].split(",")) {
-                String s = stem(raw.trim().toLowerCase());
+                String s = IngredientStemmer.stem(raw.trim().toLowerCase());
                 if (!s.isEmpty()) ings.add(s);
             }
             out.put(name, ings);
@@ -102,32 +114,28 @@ public class GraphBehaviour extends CyclicBehaviour {
 
     private List<GraphNode> buildGraph(List<String> userIngredients,
                                        Map<String, List<String>> recipeIngredientsMap) {
-        Set<String> userIngSet  = new HashSet<>(userIngredients);
-        int         totalUser   = Math.max(1, userIngredients.size());
-
-        // Grafo inverso: ingrediente → recetas que lo usan (para análisis de conectividad)
-        Map<String, List<String>> ingredientToRecipes = new HashMap<>();
-        for (Map.Entry<String, List<String>> e : recipeIngredientsMap.entrySet()) {
-            for (String ing : e.getValue()) {
-                ingredientToRecipes.computeIfAbsent(ing, k -> new ArrayList<>()).add(e.getKey());
-            }
-        }
+        int totalUser = Math.max(1, userIngredients.size());
 
         List<GraphNode> nodes = new ArrayList<>();
 
         for (Map.Entry<String, List<String>> entry : recipeIngredientsMap.entrySet()) {
-            String       recipeName = entry.getKey();
-            List<String> recipeIngs = entry.getValue();
+            String       recipeName  = entry.getKey();
+            List<String> recipeIngs  = entry.getValue();
             int          totalRecipe = Math.max(1, recipeIngs.size());
 
             List<String> matched = new ArrayList<>();
             List<String> missing = new ArrayList<>();
 
-            for (String ing : recipeIngs) {
-                if (userIngSet.contains(ing)) {
-                    matched.add(ing);
+            for (String recipeIng : recipeIngs) {
+                // IngredientStemmer.matches() cubre:
+                //   exact match, plural/singular, y genérico↔específico
+                //   ("chicken" ↔ "chicken breast", "pepper" ↔ "bell pepper")
+                boolean found = userIngredients.stream()
+                        .anyMatch(u -> IngredientStemmer.matches(u, recipeIng));
+                if (found) {
+                    matched.add(recipeIng);
                 } else {
-                    missing.add(ing);
+                    missing.add(recipeIng);
                 }
             }
 
@@ -135,7 +143,8 @@ public class GraphBehaviour extends CyclicBehaviour {
             double coverageScore = (double) matched.size() / totalRecipe;
 
             long utilized = userIngredients.stream()
-                    .filter(recipeIngs::contains)
+                    .filter(u -> recipeIngs.stream()
+                            .anyMatch(r -> IngredientStemmer.matches(u, r)))
                     .count();
             double utilizationScore = (double) utilized / totalUser;
 
@@ -155,41 +164,28 @@ public class GraphBehaviour extends CyclicBehaviour {
 
     private String buildOutputMessage(List<GraphNode> nodes,
                                       String instructionsLine,
-                                      String tfidfLine) {
+                                      String tfidfLine,
+                                      String timesLine,
+                                      String userPrefsLine) {
         StringBuilder sb = new StringBuilder("graphResults=\n");
         for (GraphNode node : nodes) {
             sb.append(node.toMessageFormat()).append("\n");
         }
         if (!instructionsLine.isEmpty()) sb.append(instructionsLine).append("\n");
         if (!tfidfLine.isEmpty())        sb.append(tfidfLine).append("\n");
+        if (!timesLine.isEmpty())        sb.append(timesLine).append("\n");
+        if (!userPrefsLine.isEmpty())    sb.append(userPrefsLine).append("\n");
         return sb.toString();
     }
 
     private void logGraph(List<String> userIngredients, List<GraphNode> nodes) {
-        System.out.println("GraphAgent: ingredientes usuario = " + userIngredients);
+        System.out.println("GraphAgent: ingredientes usuario (stemmizados) = " + userIngredients);
         for (GraphNode n : nodes) {
-            System.out.printf("  %-35s coverage=%.2f  utilization=%.2f  graph=%.2f%n",
+            System.out.printf("  %-35s  coverage=%.2f  utilization=%.2f  graph=%.2f%n",
                     n.getRecipeName(),
                     n.getCoverageScore(),
                     n.getUtilizationScore(),
                     n.getGraphScore());
         }
-    }
-
-    // ── Stemmer (coincide con OntologyProcessor para uniformidad) ────────────
-
-    private String stem(String word) {
-        if (word == null || word.isEmpty()) return "";
-        if (word.contains(" ")) return word;
-        int len = word.length();
-        if (len > 3 && word.endsWith("ies")) return word.substring(0, len - 3) + "y";
-        if (len > 4 && word.endsWith("oes")) return word.substring(0, len - 2);
-        if (len > 3 && word.endsWith("s")
-                && !word.endsWith("ss")
-                && !word.endsWith("us")
-                && !word.endsWith("is")
-                && !word.endsWith("as"))
-            return word.substring(0, len - 1);
-        return word;
     }
 }
