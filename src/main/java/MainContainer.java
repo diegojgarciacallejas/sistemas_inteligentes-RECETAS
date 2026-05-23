@@ -98,6 +98,17 @@ public class MainContainer {
                     );
 
             // =========================
+            // ExternalAgent
+            // =========================
+
+            AgentController externalAgent =
+                    container.createNewAgent(
+                            "ExternalAgent",
+                            "agents.ExternalAgent",
+                            null
+                    );
+
+            // =========================
             // START AGENTS
             // =========================
 
@@ -114,6 +125,8 @@ public class MainContainer {
             nutritionAgent.start();
 
             recommendationAgent.start();
+
+            externalAgent.start();
 
         } catch (Exception e) {
 

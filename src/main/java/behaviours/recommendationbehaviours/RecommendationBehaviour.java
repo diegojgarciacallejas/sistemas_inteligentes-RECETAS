@@ -53,6 +53,18 @@ public class RecommendationBehaviour extends CyclicBehaviour {
             System.out.println(output);
 
             sendToInterface(output);
+
+            // reply-to: ExternalAgent (testing)
+            Iterator<AID> replyToIt = msg.getAllReplyTo();
+            if (replyToIt.hasNext()) {
+                AID replyTo = replyToIt.next();
+                ACLMessage reply = new ACLMessage(ACLMessage.INFORM);
+                reply.addReceiver(replyTo);
+                reply.setConversationId("RECOMMENDATION_RESULT");
+                reply.setContent(output);
+                myAgent.send(reply);
+                System.out.println("RecommendationAgent -> reply-to: " + replyTo.getLocalName());
+            }
         } else {
             block();
         }

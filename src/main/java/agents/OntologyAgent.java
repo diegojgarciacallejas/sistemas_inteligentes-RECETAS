@@ -8,6 +8,8 @@ import jade.lang.acl.MessageTemplate;
 import behaviours.ontologybehaviours.FoodOntology;
 import utils.DFUtils;
 
+import java.util.Iterator;
+
 public class OntologyAgent extends Agent {
 
     private final OntologyProcessor processor = new OntologyProcessor();
@@ -41,6 +43,18 @@ public class OntologyAgent extends Agent {
 
                     System.out.println("OntologyAgent -> envía a GraphAgent:");
                     System.out.println(output);
+
+                    // reply-to: ExternalAgent (testing)
+                    Iterator<AID> replyToIt = msg.getAllReplyTo();
+                    if (replyToIt.hasNext()) {
+                        AID replyTo = replyToIt.next();
+                        ACLMessage reply = new ACLMessage(ACLMessage.INFORM);
+                        reply.addReceiver(replyTo);
+                        reply.setConversationId("ONTOLOGY_RESULT");
+                        reply.setContent(output);
+                        send(reply);
+                        System.out.println("OntologyAgent -> reply-to: " + replyTo.getLocalName());
+                    }
 
                 } else {
                     block();

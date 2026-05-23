@@ -34,9 +34,35 @@ public class InterfaceAgent extends Agent {
     public static final String CONV_USER_REQUEST   = "USER_REQUEST";
     public static final String CONV_RECOMMENDATION = "RECOMMENDATION_RESULT";
 
+    // ── 100 ingredientes más comunes (desplegable) ────────────────────────────
+    static final String[] COMMON_INGREDIENTS = {
+        "Aceite de coco", "Aceite de oliva", "Aceite vegetal", "Aguacate",
+        "Ajo", "Albahaca", "Alubias", "Arroz", "Arroz integral", "Atún",
+        "Avena", "Azúcar", "Bacalao", "Bacon", "Berenjena", "Brócoli",
+        "Cacahuetes", "Calabacín", "Calabaza", "Caldo de pollo",
+        "Caldo de verduras", "Canela", "Carne de cerdo", "Carne de res",
+        "Carne picada", "Cebolla", "Cebolla morada", "Champiñones",
+        "Chorizo", "Cilantro", "Coliflor", "Comino", "Curry en polvo",
+        "Cuscús", "Espárragos", "Espinacas", "Fideos", "Fresas",
+        "Gambas", "Garbanzos", "Guisantes", "Harina", "Huevo",
+        "Jamón", "Jengibre", "Judías verdes", "Laurel", "Leche",
+        "Leche de coco", "Lentejas", "Lima", "Limón", "Maíz",
+        "Mango", "Mantequilla", "Manzana", "Mayonesa", "Melocotón",
+        "Miel", "Mostaza", "Mozzarella", "Naranja", "Nata",
+        "Nueces", "Orégano", "Pan", "Pan rallado", "Parmesano",
+        "Pasta", "Patata", "Patata dulce", "Pavo", "Pepino",
+        "Perejil", "Pimienta negra", "Pimentón", "Pimiento rojo",
+        "Pimiento verde", "Piña", "Plátano", "Pollo", "Puerro",
+        "Quinoa", "Remolacha", "Romero", "Sal", "Salmón",
+        "Salsa de soja", "Salsa de tomate", "Sésamo", "Ternera",
+        "Tofu", "Tomate", "Tomate en lata", "Tomillo", "Uvas",
+        "Vinagre", "Yogur", "Zanahoria"
+    };
+
     // ── Campos de la GUI ──────────────────────────────────────────────────────
     JFrame             frame;
-    private final java.util.List<JTextField[]> ingredientRows = new java.util.ArrayList<>();
+    // Cada fila: Object[]{JComboBox<String> nombre, JTextField cantidad}
+    private final java.util.List<Object[]> ingredientRows = new java.util.ArrayList<>();
     JSpinner           spPersons;       // 1-10
     JSpinner           spMaxTime;       // minutos
     JTextField         tfRestrictions;  // "vegetariano, sin gluten"
@@ -148,8 +174,8 @@ public class InterfaceAgent extends Agent {
         // Cabecera de columnas
         JPanel header = new JPanel(new GridLayout(1, 3, 6, 0));
         header.setBackground(new Color(235, 245, 235));
-        header.add(new JLabel("Ingrediente"));
-        header.add(new JLabel("Cantidad"));
+        header.add(new JLabel("Ingrediente  ▾  (puedes escribir uno personalizado)"));
+        header.add(new JLabel("Cantidad  (ej: 200g, 3 unidades)"));
         header.add(new JLabel(""));
         header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
         ingredientsPanel.add(header);
@@ -293,9 +319,13 @@ public class InterfaceAgent extends Agent {
     String buildRequestContent() {
         StringBuilder ingredients = new StringBuilder();
         StringBuilder quantities  = new StringBuilder();
-        for (JTextField[] pair : ingredientRows) {
-            String n = pair[0].getText().trim();
-            String q = pair[1].getText().trim();
+        for (Object[] pair : ingredientRows) {
+            @SuppressWarnings("unchecked")
+            JComboBox<String> cb = (JComboBox<String>) pair[0];
+            JTextField        tf = (JTextField)        pair[1];
+            Object sel = cb.getSelectedItem();
+            String n   = (sel != null ? sel.toString() : "").trim();
+            String q   = tf.getText().trim();
             if (!n.isEmpty()) {
                 if (ingredients.length() > 0) { ingredients.append(","); quantities.append(","); }
                 ingredients.append(n);
@@ -378,21 +408,42 @@ public class InterfaceAgent extends Agent {
 
     private void addIngredientRow(JPanel panel, JButton btnAdd,
                                   String name, String qty) {
-        JTextField tfName = new JTextField(name != null ? name : "");
-        JTextField tfQty  = new JTextField(qty  != null ? qty  : "");
-        JTextField[] pair = {tfName, tfQty};
+        // ── Desplegable de ingredientes (editable: permite escribir uno personalizado) ──
+        JComboBox<String> cbName = new JComboBox<>(COMMON_INGREDIENTS);
+        cbName.setEditable(true);   // el usuario puede escribir un ingrediente que no esté en la lista
+        cbName.setFont(cbName.getFont().deriveFont(12f));
+        cbName.setBackground(Color.WHITE);
+        if (name != null && !name.isEmpty()) {
+            // Busca coincidencia en la lista (case-insensitive)
+            boolean found = false;
+            for (int i = 0; i < cbName.getItemCount(); i++) {
+                if (cbName.getItemAt(i).equalsIgnoreCase(name)) {
+                    cbName.setSelectedIndex(i);
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                // No está en la lista: lo escribe en el campo editable
+                cbName.setSelectedItem(name);
+            }
+        }
+
+        JTextField tfQty = new JTextField(qty != null ? qty : "");
+        Object[]   pair  = {cbName, tfQty};
         ingredientRows.add(pair);
 
         JPanel row = new JPanel(new GridLayout(1, 3, 12, 0));
         row.setBorder(BorderFactory.createEmptyBorder(3, 0, 3, 0));
         row.setBackground(new Color(235, 245, 235));
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 34));
 
         JButton btnRemove = new JButton("✕");
         btnRemove.setBackground(new Color(200, 50, 50));
         btnRemove.setForeground(Color.WHITE);
         btnRemove.setOpaque(true);
-        btnRemove.setBorder(BorderFactory.createLineBorder(new Color(160, 30, 30), 1, true));        btnRemove.setFocusPainted(false);
+        btnRemove.setBorder(BorderFactory.createLineBorder(new Color(160, 30, 30), 1, true));
+        btnRemove.setFocusPainted(false);
         btnRemove.setFont(btnRemove.getFont().deriveFont(Font.BOLD, 12f));
         btnRemove.setMargin(new Insets(2, 6, 2, 6));
         btnRemove.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -403,11 +454,12 @@ public class InterfaceAgent extends Agent {
             panel.repaint();
         });
 
-        row.add(tfName);
+        row.add(cbName);
         row.add(tfQty);
+
         JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
         btnPanel.setBackground(new Color(235, 245, 235));
-        Dimension btnSize = new Dimension(33, 20);
+        Dimension btnSize = new Dimension(33, 24);
         btnRemove.setPreferredSize(btnSize);
         btnRemove.setMinimumSize(btnSize);
         btnRemove.setMaximumSize(btnSize);

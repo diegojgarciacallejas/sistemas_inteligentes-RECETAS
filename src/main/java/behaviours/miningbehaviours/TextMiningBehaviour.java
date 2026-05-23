@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -174,6 +175,18 @@ public class TextMiningBehaviour extends CyclicBehaviour {
 
             System.out.println("TextMiningAgent -> envia a OntologyAgent:");
             System.out.println(output);
+
+            // reply-to: ExternalAgent (testing)
+            Iterator<AID> replyToIt = msg.getAllReplyTo();
+            if (replyToIt.hasNext()) {
+                AID replyTo = replyToIt.next();
+                ACLMessage reply = new ACLMessage(ACLMessage.INFORM);
+                reply.addReceiver(replyTo);
+                reply.setConversationId(CONV_OUT);
+                reply.setContent(output);
+                myAgent.send(reply);
+                System.out.println("TextMiningAgent -> reply-to: " + replyTo.getLocalName());
+            }
 
         } else {
             block();

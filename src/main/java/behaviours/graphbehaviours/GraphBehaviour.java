@@ -89,6 +89,18 @@ public class GraphBehaviour extends CyclicBehaviour {
             System.out.println("GraphAgent envía a RecommendationAgent:");
             System.out.println(result);
 
+            // reply-to: ExternalAgent (testing)
+            Iterator<AID> replyToIt = msg.getAllReplyTo();
+            if (replyToIt.hasNext()) {
+                AID replyTo = replyToIt.next();
+                ACLMessage reply = new ACLMessage(ACLMessage.INFORM);
+                reply.addReceiver(replyTo);
+                reply.setConversationId("GRAPH_RESULT");
+                reply.setContent(result);
+                myAgent.send(reply);
+                System.out.println("GraphAgent -> reply-to: " + replyTo.getLocalName());
+            }
+
         } else {
             block();
         }

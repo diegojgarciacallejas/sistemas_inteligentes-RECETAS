@@ -2,10 +2,7 @@ package agents;
 
 import behaviours.miningbehaviours.TextMiningBehaviour;
 import jade.core.Agent;
-import jade.domain.DFService;
-import jade.domain.FIPAAgentManagement.DFAgentDescription;
-import jade.domain.FIPAAgentManagement.ServiceDescription;
-import jade.domain.FIPAException;
+import utils.DFUtils;
 
 /**
  * TextMiningAgent
@@ -28,29 +25,14 @@ public class TextMiningAgent extends Agent {
     protected void setup() {
         System.out.println(getLocalName() + " iniciado.");
 
-        DFAgentDescription dfd = new DFAgentDescription();
-        dfd.setName(getAID());
-        ServiceDescription sd = new ServiceDescription();
-        sd.setType("text-mining-service");
-        sd.setName(getLocalName() + "-text-mining");
-        dfd.addServices(sd);
-        try {
-            DFService.register(this, dfd);
-            System.out.println(getLocalName() + " registrado en DF como text-mining-service");
-        } catch (FIPAException fe) {
-            fe.printStackTrace();
-        }
+        DFUtils.registerService(this, "text-mining-service");
 
         addBehaviour(new TextMiningBehaviour(this));
     }
 
     @Override
     protected void takeDown() {
-        try {
-            DFService.deregister(this);
-        } catch (FIPAException fe) {
-            fe.printStackTrace();
-        }
+        DFUtils.deregister(this);
         System.out.println(getLocalName() + " finalizado.");
     }
 }
