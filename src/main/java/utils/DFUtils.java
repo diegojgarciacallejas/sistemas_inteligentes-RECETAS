@@ -10,29 +10,18 @@ import jade.domain.FIPAAgentManagement.ServiceDescription;
 public class DFUtils {
 
     public static void registerService(Agent agent, String serviceType) {
-
         DFAgentDescription dfd = new DFAgentDescription();
-
         dfd.setName(agent.getAID());
 
         ServiceDescription sd = new ServiceDescription();
-
         sd.setType(serviceType);
-
         sd.setName(agent.getLocalName() + "-" + serviceType);
 
         dfd.addServices(sd);
 
         try {
-
             DFService.register(agent, dfd);
-
-            System.out.println(
-                    agent.getLocalName()
-                            + " registrado en DF como "
-                            + serviceType
-            );
-
+            System.out.println(agent.getLocalName() + " registrado en DF como " + serviceType);
         } catch (FIPAException e) {
             e.printStackTrace();
         }
