@@ -392,9 +392,10 @@ public class TextMiningBehaviour extends CyclicBehaviour {
             for (int i = 0; i < d.ingredientDetails.size(); i++) {
                 if (i > 0) ingredientsLine.append(",");
                 IngredientInfo info = d.ingredientDetails.get(i);
+                double[] converted = convertToStandardUnit(info.amount, info.unit);
                 ingredientsLine.append(info.name)
-                        .append("|").append(formatAmount(info.amount))
-                        .append("|").append(info.unit);
+                        .append("|").append(formatAmount(converted[0]))
+                        .append("|").append(unitLabel((int) converted[1]));
             }
 
             timesLine.append(key).append(":").append(d.readyInMinutes);
@@ -694,6 +695,62 @@ public class TextMiningBehaviour extends CyclicBehaviour {
     private String sanitizeUnit(String unit) {
         if (unit == null) return "";
         return unit.replaceAll("[|;:\n]", "").trim();
+    }
+
+    // ── Conversión de unidades ────────────────────────────────────────────────
+    // Códigos de unidad de salida: 0=g, 1=ml, 2=tbsp, 3=tsp, 4=original
+    private static final int U_G    = 0;
+    private static final int U_ML   = 1;
+    private static final int U_TBSP = 2;
+    private static final int U_TSP  = 3;
+    private static final int U_ORIG = 4;
+
+    /**
+     * Convierte amount+unit a gramos (sólidos) o ml (líquidos).
+     * Mantiene cucharadas/cucharaditas sin convertir.
+     * Devuelve [cantidad_convertida, código_unidad].
+     */
+    private double[] convertToStandardUnit(double amount, String unit) {
+        if (unit == null) return new double[]{amount, U_ORIG};
+        String u = unit.trim().toLowerCase();
+        switch (u) {
+            // Sólidos → gramos
+            case "oz":    case "ounce":  case "ounces":
+                return new double[]{amount * 28.3495, U_G};
+            case "lb":    case "lbs":    case "pound": case "pounds":
+                return new double[]{amount * 453.592, U_G};
+            case "kg":    case "kilogram": case "kilograms":
+                return new double[]{amount * 1000.0,  U_G};
+            case "g":     case "gram":   case "grams":
+                return new double[]{amount, U_G};
+            // Líquidos → ml
+            case "l":     case "liter":  case "litre": case "liters": case "litres":
+                return new double[]{amount * 1000.0,  U_ML};
+            case "ml":    case "milliliter": case "millilitre":
+                return new double[]{amount, U_ML};
+            case "fl oz": case "fluid ounce": case "fluid ounces":
+                return new double[]{amount * 29.5735, U_ML};
+            case "cup":   case "cups":
+                return new double[]{amount * 240.0,   U_ML};
+            // Cucharadas y cucharaditas → conservar
+            case "tbsp":  case "tablespoon": case "tablespoons":
+                return new double[]{amount, U_TBSP};
+            case "tsp":   case "teaspoon":   case "teaspoons":
+                return new double[]{amount, U_TSP};
+            // Resto: pinch, clove, slice, piece, whole, etc. → sin conversión
+            default:
+                return new double[]{amount, U_ORIG};
+        }
+    }
+
+    private String unitLabel(int code) {
+        switch (code) {
+            case U_G:    return "g";
+            case U_ML:   return "ml";
+            case U_TBSP: return "tbsp";
+            case U_TSP:  return "tsp";
+            default:     return "";
+        }
     }
 
     private String formatAmount(double amount) {
