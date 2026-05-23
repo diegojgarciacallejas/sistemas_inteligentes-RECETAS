@@ -73,9 +73,12 @@ public class RecommendationBehaviour extends CyclicBehaviour {
     // ── Cálculo del ranking ───────────────────────────────────────────────────
 
     private List<RecipeScore> calculateRanking(String input) {
-        Map<String, Double>  tfidfScores  = parseTfidfScores(input);
-        Map<String, String>  instructions = parseInstructions(input);
-        Map<String, Integer> recipeTimes  = parseRecipeTimes(input);
+        Map<String, Double>  tfidfScores       = parseTfidfScores(input);
+        Map<String, String>  instructions      = parseInstructions(input);
+        Map<String, Integer> recipeTimes       = parseRecipeTimes(input);
+        Map<String, String>  recipeIngredients = parseRecipeIngredientDetails(input);
+        Map<String, String>  recipeTags        = parseSimpleStringMap(input, "recipeTags=");
+        Map<String, Integer> healthScores      = parseSimpleIntMap(input, "recipeHealthScores=");
 
         int    maxTime     = parseMaxTime(input);
         String restrictions = parseRestrictions(input);
@@ -88,6 +91,12 @@ public class RecommendationBehaviour extends CyclicBehaviour {
                     || line.startsWith("recipeTfIdfScores=")
                     || line.startsWith("recipeTimes=")
                     || line.startsWith("userPrefs=")
+                    || line.startsWith("recipeIngredients=")
+                    || line.startsWith("recipeTags=")
+                    || line.startsWith("recipeHealthScores=")
+                    || line.startsWith("recipeServings=")
+                    || line.startsWith("recipeCuisines=")
+                    || line.startsWith("recipeDishTypes=")
                     || line.trim().isEmpty()) {
                 continue;
             }
@@ -144,7 +153,10 @@ public class RecommendationBehaviour extends CyclicBehaviour {
                     utilizationScore,
                     rawTfidf,
                     finalScore,
-                    instructions.getOrDefault(recipeName, "")
+                    instructions.getOrDefault(recipeName, ""),
+                    recipeIngredients.getOrDefault(recipeName, ""),
+                    recipeTags.getOrDefault(recipeName, ""),
+                    healthScores.getOrDefault(recipeName, -1)
             ));
         }
 
@@ -176,12 +188,49 @@ public class RecommendationBehaviour extends CyclicBehaviour {
               .append(String.format(Locale.US, "%.4f", r.getTfidfScore()))
               .append("\n");
 
+            // Etiquetas dietéticas y puntuación de salud
+            String tags = r.getTags();
+            int health  = r.getHealthScore();
+            if ((tags != null && !tags.isBlank()) || health >= 0) {
+                sb.append("  ");
+                if (tags != null && !tags.isBlank()) {
+                    for (String tag : tags.split(",")) {
+                        switch (tag.trim()) {
+                            case "vegan":       sb.append("🌱 Vegano  "); break;
+                            case "vegetarian":  sb.append("🥦 Vegetariano  "); break;
+                            case "glutenFree":  sb.append("🌾 Sin gluten  "); break;
+                            case "dairyFree":   sb.append("🥛 Sin lácteos  "); break;
+                        }
+                    }
+                }
+                if (health >= 0) sb.append("❤ Salud: ").append(health).append("/100");
+                sb.append("\n");
+            }
+
             sb.append("  ").append(buildExplanation(r)).append("\n");
+
+            // Ingredientes con cantidades
+            String ingDetails = r.getIngredientDetails();
+            if (ingDetails != null && !ingDetails.isBlank()) {
+                sb.append("  Ingredientes:\n");
+                for (String entry : ingDetails.split(",")) {
+                    String[] parts = entry.split("\\|");
+                    if (parts.length >= 3) {
+                        String ingName = parts[0].trim();
+                        String amount  = parts[1].trim();
+                        String unit    = parts[2].trim();
+                        String display = unit.isEmpty() ? amount : amount + " " + unit;
+                        sb.append("    • ").append(ingName).append(": ").append(display).append("\n");
+                    } else if (parts.length == 1) {
+                        sb.append("    • ").append(parts[0].trim()).append("\n");
+                    }
+                }
+            }
 
             String steps = r.getInstructions();
             if (steps != null && !steps.isBlank()) {
-                String preview = steps.length() > 200
-                        ? steps.substring(0, 200).trim() + "..."
+                String preview = steps.length() > 300
+                        ? steps.substring(0, 300).trim() + "..."
                         : steps;
                 sb.append("  Preparación: ").append(preview).append("\n");
             }
@@ -247,6 +296,25 @@ public class RecommendationBehaviour extends CyclicBehaviour {
         return map;
     }
 
+    /**
+     * Parsea la línea recipeIngredients=RecipeName:ing1|amount|unit,ing2|amount|unit;...
+     * Devuelve mapa nombreReceta → "ing1|amount|unit,ing2|amount|unit"
+     */
+    private Map<String, String> parseRecipeIngredientDetails(String input) {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (String line : input.split("\n")) {
+            if (!line.startsWith("recipeIngredients=")) continue;
+            for (String entry : line.substring("recipeIngredients=".length()).split(";")) {
+                int colon = entry.indexOf(":");
+                if (colon > 0) {
+                    map.put(entry.substring(0, colon).trim(),
+                            entry.substring(colon + 1).trim());
+                }
+            }
+        }
+        return map;
+    }
+
     private Map<String, Integer> parseRecipeTimes(String input) {
         Map<String, Integer> times = new LinkedHashMap<>();
         for (String line : input.split("\n")) {
@@ -302,6 +370,37 @@ public class RecommendationBehaviour extends CyclicBehaviour {
             }
         }
         return ings;
+    }
+
+    /** Parser genérico: clave=RecipeName:valor;RecipeName2:valor2 → Map<nombre, String> */
+    private Map<String, String> parseSimpleStringMap(String input, String prefix) {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (String line : input.split("\n")) {
+            if (!line.startsWith(prefix)) continue;
+            for (String entry : line.substring(prefix.length()).split(";")) {
+                int colon = entry.indexOf(":");
+                if (colon > 0)
+                    map.put(entry.substring(0, colon).trim(), entry.substring(colon + 1).trim());
+            }
+        }
+        return map;
+    }
+
+    /** Parser genérico: clave=RecipeName:intVal;... → Map<nombre, Integer> */
+    private Map<String, Integer> parseSimpleIntMap(String input, String prefix) {
+        Map<String, Integer> map = new LinkedHashMap<>();
+        for (String line : input.split("\n")) {
+            if (!line.startsWith(prefix)) continue;
+            for (String entry : line.substring(prefix.length()).split(";")) {
+                int colon = entry.indexOf(":");
+                if (colon > 0) {
+                    try { map.put(entry.substring(0, colon).trim(),
+                            Integer.parseInt(entry.substring(colon + 1).trim())); }
+                    catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        return map;
     }
 
     private double parseField(String[] parts, String fieldName) {

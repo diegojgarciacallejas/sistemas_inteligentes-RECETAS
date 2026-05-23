@@ -48,10 +48,13 @@ public class GraphBehaviour extends CyclicBehaviour {
 
             List<String>              userIngredients      = new ArrayList<>();
             Map<String, List<String>> recipeIngredientsMap = new LinkedHashMap<>();
-            String instructionsLine = "";
-            String tfidfLine        = "";
-            String timesLine        = "";
-            String userPrefsLine    = "";
+            String instructionsLine      = "";
+            String tfidfLine             = "";
+            String timesLine             = "";
+            String userPrefsLine         = "";
+            String recipeIngredientsLine = "";
+            String recipeTagsLine        = "";
+            String healthScoresLine      = "";
 
             for (String line : fullInput.split("\n")) {
                 if (line.startsWith("userIngredients=")) {
@@ -69,16 +72,21 @@ public class GraphBehaviour extends CyclicBehaviour {
                     timesLine = line;
                 } else if (line.startsWith("userPrefs=")) {
                     userPrefsLine = line;
+                } else if (line.startsWith("recipeIngredients=")) {
+                    recipeIngredientsLine = line;
+                } else if (line.startsWith("recipeTags=")) {
+                    recipeTagsLine = line;
+                } else if (line.startsWith("recipeHealthScores=")) {
+                    healthScoresLine = line;
                 }
-                // El resto de líneas (recipeIngredients=, recipeServings=, etc.)
-                // ya no son necesarias en este agente y se descartan aquí.
             }
 
             List<GraphNode> nodes = buildGraph(userIngredients, recipeIngredientsMap);
             logGraph(userIngredients, nodes);
 
             String result = buildOutputMessage(
-                    nodes, instructionsLine, tfidfLine, timesLine, userPrefsLine);
+                    nodes, instructionsLine, tfidfLine, timesLine, userPrefsLine,
+                    recipeIngredientsLine, recipeTagsLine, healthScoresLine);
 
             ACLMessage forward = new ACLMessage(ACLMessage.INFORM);
             forward.addReceiver(new AID("RecommendationAgent", AID.ISLOCALNAME));
@@ -178,15 +186,21 @@ public class GraphBehaviour extends CyclicBehaviour {
                                       String instructionsLine,
                                       String tfidfLine,
                                       String timesLine,
-                                      String userPrefsLine) {
+                                      String userPrefsLine,
+                                      String recipeIngredientsLine,
+                                      String recipeTagsLine,
+                                      String healthScoresLine) {
         StringBuilder sb = new StringBuilder("graphResults=\n");
         for (GraphNode node : nodes) {
             sb.append(node.toMessageFormat()).append("\n");
         }
-        if (!instructionsLine.isEmpty()) sb.append(instructionsLine).append("\n");
-        if (!tfidfLine.isEmpty())        sb.append(tfidfLine).append("\n");
-        if (!timesLine.isEmpty())        sb.append(timesLine).append("\n");
-        if (!userPrefsLine.isEmpty())    sb.append(userPrefsLine).append("\n");
+        if (!instructionsLine.isEmpty())      sb.append(instructionsLine).append("\n");
+        if (!tfidfLine.isEmpty())             sb.append(tfidfLine).append("\n");
+        if (!timesLine.isEmpty())             sb.append(timesLine).append("\n");
+        if (!userPrefsLine.isEmpty())         sb.append(userPrefsLine).append("\n");
+        if (!recipeIngredientsLine.isEmpty()) sb.append(recipeIngredientsLine).append("\n");
+        if (!recipeTagsLine.isEmpty())        sb.append(recipeTagsLine).append("\n");
+        if (!healthScoresLine.isEmpty())      sb.append(healthScoresLine).append("\n");
         return sb.toString();
     }
 

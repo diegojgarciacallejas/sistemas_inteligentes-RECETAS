@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * TextMiningBehaviour
@@ -217,15 +218,25 @@ public class TextMiningBehaviour extends CyclicBehaviour {
                     ? root.getAsJsonArray("recipes")
                     : new JsonArray();
 
-            Map<String, RecipeData> recipeDataMap = new LinkedHashMap<>();
-
+            // ── Llamadas a Spoonacular en paralelo (1 por receta) ───────────────
+            // Lanzamos todas las peticiones simultáneamente para no esperar
+            // cada una de forma secuencial (3 llamadas × ~1s = ~3s → ~1s en paralelo).
+            Map<String, CompletableFuture<RecipeData>> futures = new LinkedHashMap<>();
             for (JsonElement el : recipes) {
                 JsonObject recipe = el.getAsJsonObject();
                 int    id   = recipe.get("id").getAsInt();
                 String name = recipe.get("name").getAsString();
+                String key  = sanitizeName(name);
+                futures.put(key, CompletableFuture.supplyAsync(() -> fetchAndExtract(id, name)));
+            }
 
-                RecipeData data = fetchAndExtract(id, name);
-                recipeDataMap.put(sanitizeName(name), data);
+            Map<String, RecipeData> recipeDataMap = new LinkedHashMap<>();
+            for (Map.Entry<String, CompletableFuture<RecipeData>> entry : futures.entrySet()) {
+                try {
+                    recipeDataMap.put(entry.getKey(), entry.getValue().get());
+                } catch (Exception e) {
+                    System.err.println("TextMiningAgent: error en fetch paralelo: " + e.getMessage());
+                }
             }
 
             // ── Minería de texto: TF-IDF + similitud coseno ─────────────────
@@ -285,8 +296,19 @@ public class TextMiningBehaviour extends CyclicBehaviour {
                 String normalized = normalize(rawName);
                 if (!normalized.isEmpty()) {
                     ingredients.add(normalized);
-                    double amount = getDoubleSafe(ing, "amount");
-                    String unit   = sanitizeUnit(getStringSafe(ing, "unit"));
+                    // Usar measures.metric si está disponible: Spoonacular ya convierte
+                    // sólidos a gramos y líquidos a ml, evitando conversiones manuales incorrectas
+                    double amount;
+                    String unit;
+                    if (ing.has("measures") && !ing.get("measures").isJsonNull()) {
+                        JsonObject metric = ing.getAsJsonObject("measures")
+                                             .getAsJsonObject("metric");
+                        amount = getDoubleSafe(metric, "amount");
+                        unit   = sanitizeUnit(getStringSafe(metric, "unitShort"));
+                    } else {
+                        amount = getDoubleSafe(ing, "amount");
+                        unit   = sanitizeUnit(getStringSafe(ing, "unit"));
+                    }
                     ingredientDetails.add(new IngredientInfo(normalized, amount, unit));
                 }
             }
