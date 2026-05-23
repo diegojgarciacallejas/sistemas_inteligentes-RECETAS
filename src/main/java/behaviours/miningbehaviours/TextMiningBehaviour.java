@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -45,7 +46,7 @@ import java.util.Set;
  *
  * Diseño para testabilidad:
  *   La interfaz funcional RecipeFetcher separa la lógica HTTP del parsing.
- *   En producción se usa el fetcher real (Spoonacular).
+ *   En producción se usa el fetcher real (TheMealDB).
  *   En tests se inyecta una lambda que devuelve JSON hardcodeado, sin red.
  */
 public class TextMiningBehaviour extends CyclicBehaviour {
@@ -176,6 +177,18 @@ public class TextMiningBehaviour extends CyclicBehaviour {
             System.out.println("TextMiningAgent -> envia a OntologyAgent:");
             System.out.println(output);
 
+            // reply-to: ExternalAgent (testing)
+            Iterator<AID> replyToIt = msg.getAllReplyTo();
+            if (replyToIt.hasNext()) {
+                AID replyTo = replyToIt.next();
+                ACLMessage reply = new ACLMessage(ACLMessage.INFORM);
+                reply.addReceiver(replyTo);
+                reply.setConversationId(CONV_OUT);
+                reply.setContent(output);
+                myAgent.send(reply);
+                System.out.println("TextMiningAgent -> reply-to: " + replyTo.getLocalName());
+            }
+
         } else {
             block();
         }
@@ -196,6 +209,10 @@ public class TextMiningBehaviour extends CyclicBehaviour {
                     ? root.get("userIngredients").getAsString().trim()
                     : "";
 
+            // Preferencias del usuario propagadas desde SearchBehaviour
+            int    maxTime     = root.has("maxTime")     ? root.get("maxTime").getAsInt()        : -1;
+            String restrictions = root.has("restrictions") ? root.get("restrictions").getAsString().trim() : "";
+
             JsonArray recipes = root.has("recipes")
                     ? root.getAsJsonArray("recipes")
                     : new JsonArray();
@@ -214,7 +231,8 @@ public class TextMiningBehaviour extends CyclicBehaviour {
             // ── Minería de texto: TF-IDF + similitud coseno ─────────────────
             Map<String, Double> tfidfScores = computeTfIdfScores(userIngredients, recipeDataMap);
 
-            return buildOutputMessage(userIngredients, recipeDataMap, tfidfScores);
+            return buildOutputMessage(userIngredients, recipeDataMap, tfidfScores,
+                    maxTime, restrictions);
 
         } catch (Exception e) {
             System.err.println("TextMiningAgent: error procesando entrada: " + e.getMessage());
@@ -260,13 +278,10 @@ public class TextMiningBehaviour extends CyclicBehaviour {
         if (data.has("extendedIngredients")) {
             for (JsonElement el : data.getAsJsonArray("extendedIngredients")) {
                 JsonObject ing = el.getAsJsonObject();
-
                 // Preferir nameClean (nombre limpio) sobre name
                 String rawName = getStringSafe(ing, "nameClean");
                 if (rawName.isEmpty()) rawName = getStringSafe(ing, "name");
-
                 if (rawName.isEmpty() || !isValidIngredientName(rawName)) continue;
-
                 String normalized = normalize(rawName);
                 if (!normalized.isEmpty()) {
                     ingredients.add(normalized);
@@ -285,24 +300,14 @@ public class TextMiningBehaviour extends CyclicBehaviour {
         boolean dairyFree  = getBoolSafe(data, "dairyFree");
 
         List<String> cuisines = new ArrayList<>();
-        if (data.has("cuisines") && data.get("cuisines").isJsonArray()) {
-            for (JsonElement c : data.getAsJsonArray("cuisines")) {
-                if (!c.isJsonNull()) {
-                    String cuisine = sanitizeName(c.getAsString());
-                    if (!cuisine.isEmpty()) cuisines.add(cuisine.toLowerCase());
-                }
-            }
-        }
+        if (data.has("cuisines") && data.get("cuisines").isJsonArray())
+            for (JsonElement c : data.getAsJsonArray("cuisines"))
+                if (!c.isJsonNull()) { String s = sanitizeName(c.getAsString()); if (!s.isEmpty()) cuisines.add(s.toLowerCase()); }
 
         List<String> dishTypes = new ArrayList<>();
-        if (data.has("dishTypes") && data.get("dishTypes").isJsonArray()) {
-            for (JsonElement d : data.getAsJsonArray("dishTypes")) {
-                if (!d.isJsonNull()) {
-                    String dishType = sanitizeName(d.getAsString());
-                    if (!dishType.isEmpty()) dishTypes.add(dishType.toLowerCase());
-                }
-            }
-        }
+        if (data.has("dishTypes") && data.get("dishTypes").isJsonArray())
+            for (JsonElement d : data.getAsJsonArray("dishTypes"))
+                if (!d.isJsonNull()) { String s = sanitizeName(d.getAsString()); if (!s.isEmpty()) dishTypes.add(s.toLowerCase()); }
 
         int healthScore = getIntSafe(data, "healthScore");
 
@@ -339,9 +344,18 @@ public class TextMiningBehaviour extends CyclicBehaviour {
      *   Los ';' y '|' de las instrucciones se reemplazan para no romper el protocolo.
      *   Se usa split(":", 2) para leer esta linea ya que el texto puede contener ':'.
      */
+    /** Overload sin preferencias — mantiene compatibilidad con tests existentes. */
     String buildOutputMessage(String userIngredients,
                               Map<String, RecipeData> recipeDataMap,
                               Map<String, Double> tfidfScores) {
+        return buildOutputMessage(userIngredients, recipeDataMap, tfidfScores, -1, "");
+    }
+
+    String buildOutputMessage(String userIngredients,
+                              Map<String, RecipeData> recipeDataMap,
+                              Map<String, Double> tfidfScores,
+                              int maxTime,
+                              String restrictions) {
         StringBuilder recipesLine        = new StringBuilder("recipes=");
         StringBuilder ingredientsLine    = new StringBuilder("recipeIngredients=");
         StringBuilder timesLine          = new StringBuilder("recipeTimes=");
@@ -409,6 +423,9 @@ public class TextMiningBehaviour extends CyclicBehaviour {
             instructionsLine.append(key).append(":").append(safeInstructions);
         }
 
+        // Línea de preferencias de usuario (propagada a GraphAgent y RecommendationAgent)
+        String userPrefsLine = buildUserPrefsLine(maxTime, restrictions);
+
         return "userIngredients=" + userIngredients + "\n"
                 + recipesLine        + "\n"
                 + ingredientsLine    + "\n"
@@ -419,7 +436,15 @@ public class TextMiningBehaviour extends CyclicBehaviour {
                 + dishTypesLine      + "\n"
                 + healthScoresLine   + "\n"
                 + tfidfLine          + "\n"
-                + instructionsLine   + "\n";
+                + instructionsLine   + "\n"
+                + userPrefsLine      + "\n";
+    }
+
+    private String buildUserPrefsLine(int maxTime, String restrictions) {
+        StringBuilder sb = new StringBuilder("userPrefs=");
+        sb.append("maxTime:").append(maxTime);
+        sb.append(";restrictions:").append(restrictions.replace(";", ","));
+        return sb.toString();
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -472,9 +497,13 @@ public class TextMiningBehaviour extends CyclicBehaviour {
         String userText = userIngredients.replace(",", " ");
         List<String> userTokens = tokenize(userText);
 
+        // TF-IDF sobre la lista de ingredientes de cada receta (no sobre las instrucciones).
+        // Así medimos similitud real entre lo que el usuario tiene y lo que la receta necesita.
         Map<String, List<String>> recipeTokens = new LinkedHashMap<>();
         for (Map.Entry<String, RecipeData> entry : recipeDataMap.entrySet()) {
-            recipeTokens.put(entry.getKey(), tokenize(entry.getValue().rawText));
+            // Unimos los nombres de ingredientes como texto para tokenizar
+            String ingredientText = String.join(" ", entry.getValue().ingredients);
+            recipeTokens.put(entry.getKey(), tokenize(ingredientText));
         }
 
         // IDF: corpus externo (RecipeNLG) si está disponible, local si no

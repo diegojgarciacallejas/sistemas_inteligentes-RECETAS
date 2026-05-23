@@ -1,0 +1,13 @@
+<component name="libraryTable">
+  <library name="libs">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/libs/gson-2.10.1.jar!/" />
+      <root url="jar://$PROJECT_DIR$/libs/jade.jar!/" />
+      <root url="jar://$PROJECT_DIR$/libs/guava-18.0.jar!/" />
+      <root url="jar://$PROJECT_DIR$/libs/owlapi-distribution-3.5.6.jar!/" />
+      <root url="jar://$PROJECT_DIR$/libs/trove4j-3.0.3.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

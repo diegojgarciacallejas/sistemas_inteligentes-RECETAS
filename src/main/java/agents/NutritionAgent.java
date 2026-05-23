@@ -14,9 +14,11 @@ import jade.lang.acl.MessageTemplate;
 import java.net.http.HttpClient;
 
 public class NutritionAgent extends Agent {
+
+    private static final String API_KEY = "74e8728ac10847199e9b7db0f0d97a4e";
+
     private HttpClient httpClient;
     private Gson gson;
-    private static final String API_KEY = "74e8728ac10847199e9b7db0f0d97a4e";
 
     @Override
     protected void setup() {
@@ -32,6 +34,7 @@ public class NutritionAgent extends Agent {
         dfd.addServices(sd);
         try {
             DFService.register(this, dfd);
+            System.out.println(getLocalName() + " registrado en DF como " + sd.getType());
         } catch (FIPAException fe) {
             fe.printStackTrace();
         }

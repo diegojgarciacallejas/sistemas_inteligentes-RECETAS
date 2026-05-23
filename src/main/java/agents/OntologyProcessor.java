@@ -1,6 +1,7 @@
 package agents;
 
 import behaviours.ontologybehaviours.FoodOntology;
+import utils.IngredientStemmer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -80,53 +81,10 @@ public class OntologyProcessor {
     }
 
     /**
-     * Stemmer de sufijos para nombres de ingredientes en inglés.
-     *
-     * Cubre los casos de pluralización más comunes en recetas:
-     *   eggs       → egg        (-s)
-     *   mushrooms  → mushroom   (-s)
-     *   tomatoes   → tomato     (-oes)
-     *   potatoes   → potato     (-oes)
-     *   berries    → berry      (-ies)
-     *   cherries   → cherry     (-ies)
-     *   cloves     → clove      (-s)
-     *   onions     → onion      (-s)
-     *
-     * Casos protegidos (no se despluralizan):
-     *   peas       → peas       (termina en -as)
-     *   asparagus  → asparagus  (termina en -us)
-     *   grass      → grass      (termina en -ss)
-     *
-     * Ingredientes compuestos ("olive oil", "soy sauce") se devuelven sin cambios.
+     * Delega en IngredientStemmer para mantener las reglas centralizadas.
+     * Se expone como static para no romper OntologyAgentTest que lo llama directamente.
      */
     static String stem(String word) {
-        if (word == null || word.isEmpty()) return "";
-        word = word.trim().toLowerCase();
-        // Ingrediente compuesto: no tocar ("olive oil", "coconut milk")
-        if (word.contains(" ")) return word;
-
-        int len = word.length();
-
-        // -ies → -y : berries→berry, cherries→cherry, jalapeños→jalapeño
-        if (len > 3 && word.endsWith("ies"))
-            return word.substring(0, len - 3) + "y";
-
-        // -oes → -o : tomatoes→tomato, potatoes→potato
-        if (len > 4 && word.endsWith("oes"))
-            return word.substring(0, len - 2);
-
-        // -s → eliminar, con protecciones:
-        //   -ss  : bass, grass
-        //   -us  : asparagus, citrus
-        //   -is  : (raro en ingredientes)
-        //   -as  : peas
-        if (len > 3 && word.endsWith("s")
-                && !word.endsWith("ss")
-                && !word.endsWith("us")
-                && !word.endsWith("is")
-                && !word.endsWith("as"))
-            return word.substring(0, len - 1);
-
-        return word;
+        return IngredientStemmer.stem(word);
     }
 }
