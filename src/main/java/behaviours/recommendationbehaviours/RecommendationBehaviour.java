@@ -157,15 +157,14 @@ public class RecommendationBehaviour extends CyclicBehaviour {
 
         for (RecipeScore recipe : ranking) {
 
+            // Formato que InterfaceAgent parsea: RANK|name|graphScore|finalScore
             sb.append(position)
-                    .append(". ")
+                    .append("|")
                     .append(recipe.getRecipeName())
-                    .append(" | graphScore=")
+                    .append("|")
                     .append(String.format(Locale.US, "%.2f", recipe.getGraphScore()))
-                    .append(" | finalScore=")
+                    .append("|")
                     .append(String.format(Locale.US, "%.2f", recipe.getFinalScore()))
-                    .append(" | explanation=")
-                    .append(buildExplanation(recipe))
                     .append("\n");
 
             // Añadir instrucciones si existen
