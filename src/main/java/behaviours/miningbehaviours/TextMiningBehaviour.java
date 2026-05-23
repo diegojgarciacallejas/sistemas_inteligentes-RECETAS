@@ -51,7 +51,7 @@ import java.util.Set;
 public class TextMiningBehaviour extends CyclicBehaviour {
 
     // ── Constantes ──────────────────────────────────────────────────────────
-    private static final String MEALDB_BASE    = "https://www.themealdb.com/api/json/v1/1/";
+    private static final String API_KEY        = "74e8728ac10847199e9b7db0f0d97a4e";
     private static final String CONV_IN        = "RECIPE_SEARCH_RESULT";
     private static final String CONV_OUT       = "TEXT_MINING_RESULT";
     private static final String ONTOLOGY_AGENT = "OntologyAgent";
@@ -117,7 +117,8 @@ public class TextMiningBehaviour extends CyclicBehaviour {
 
         HttpClient httpClient = HttpClient.newHttpClient();
         this.fetcher = id -> {
-            String url = "https://www.themealdb.com/api/json/v1/1/lookup.php?i=" + id;
+            String url = "https://api.spoonacular.com/recipes/" + id
+                    + "/information?apiKey=" + API_KEY;
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
@@ -130,7 +131,7 @@ public class TextMiningBehaviour extends CyclicBehaviour {
             if (response.statusCode() == 200) {
                 return response.body();
             }
-            System.err.println("TextMiningAgent: TheMealDB devolvió "
+            System.err.println("TextMiningAgent: Spoonacular devolvió "
                     + response.statusCode() + " para id=" + id);
             return null;
         };
@@ -247,95 +248,71 @@ public class TextMiningBehaviour extends CyclicBehaviour {
      * y texto libre (summary + instructions) para el posterior análisis TF-IDF.
      */
     /**
-     * Parsea el JSON de TheMealDB (lookup.php?i={id}).
-     * Formato: {"meals":[{strMeal, strInstructions, strArea, strCategory,
-     *                     strIngredient1..20, strMeasure1..20, strTags, ...}]}
+     * Parsea el JSON de Spoonacular /recipes/{id}/information.
+     * Extrae ingredientes, cantidades, flags dietéticos, salud e instrucciones.
      */
     RecipeData extractRecipeData(String name, String jsonBody) {
-        JsonObject root = gson.fromJson(jsonBody, JsonObject.class);
-
-        // TheMealDB envuelve el resultado en {"meals":[{...}]}
-        JsonObject data;
-        if (root.has("meals") && !root.get("meals").isJsonNull()) {
-            data = root.getAsJsonArray("meals").get(0).getAsJsonObject();
-        } else {
-            // Aceptar también JSON plano (tests)
-            data = root;
-        }
+        JsonObject data = gson.fromJson(jsonBody, JsonObject.class);
 
         List<String> ingredients             = new ArrayList<>();
         List<IngredientInfo> ingredientDetails = new ArrayList<>();
 
-        // TheMealDB usa strIngredient1..20 + strMeasure1..20
-        for (int i = 1; i <= 20; i++) {
-            String ingKey     = "strIngredient" + i;
-            String measureKey = "strMeasure"    + i;
+        if (data.has("extendedIngredients")) {
+            for (JsonElement el : data.getAsJsonArray("extendedIngredients")) {
+                JsonObject ing = el.getAsJsonObject();
 
-            String rawName = getStringSafe(data, ingKey).trim();
-            if (rawName.isEmpty()) continue;                          // fin de lista
+                // Preferir nameClean (nombre limpio) sobre name
+                String rawName = getStringSafe(ing, "nameClean");
+                if (rawName.isEmpty()) rawName = getStringSafe(ing, "name");
 
-            if (!isValidIngredientName(rawName)) continue;
+                if (rawName.isEmpty() || !isValidIngredientName(rawName)) continue;
 
-            String normalized = normalize(rawName);
-            if (normalized.isEmpty()) continue;
-
-            ingredients.add(normalized);
-
-            // Parsear medida: "1 cup", "200 g", "3/4 tsp" → amount + unit
-            String measure = getStringSafe(data, measureKey).trim();
-            double amount  = parseMeasureAmount(measure);
-            String unit    = parseMeasureUnit(measure);
-            ingredientDetails.add(new IngredientInfo(normalized, amount, unit));
+                String normalized = normalize(rawName);
+                if (!normalized.isEmpty()) {
+                    ingredients.add(normalized);
+                    double amount = getDoubleSafe(ing, "amount");
+                    String unit   = sanitizeUnit(getStringSafe(ing, "unit"));
+                    ingredientDetails.add(new IngredientInfo(normalized, amount, unit));
+                }
+            }
         }
 
-        // TheMealDB no tiene readyInMinutes, servings ni flags dietéticos
-        int     readyInMinutes = -1;
-        int     servings       = -1;
-        boolean vegan          = false;
-        boolean vegetarian     = false;
-        boolean glutenFree     = false;
-        boolean dairyFree      = false;
-        int     healthScore    = -1;
+        int readyInMinutes = getIntSafe(data, "readyInMinutes");
+        int servings       = getIntSafe(data, "servings");
+        boolean vegan      = getBoolSafe(data, "vegan");
+        boolean vegetarian = getBoolSafe(data, "vegetarian");
+        boolean glutenFree = getBoolSafe(data, "glutenFree");
+        boolean dairyFree  = getBoolSafe(data, "dairyFree");
 
-        // Área geográfica → cuisine; Categoría → dishType
-        List<String> cuisines  = new ArrayList<>();
+        List<String> cuisines = new ArrayList<>();
+        if (data.has("cuisines") && data.get("cuisines").isJsonArray()) {
+            for (JsonElement c : data.getAsJsonArray("cuisines")) {
+                if (!c.isJsonNull()) {
+                    String cuisine = sanitizeName(c.getAsString());
+                    if (!cuisine.isEmpty()) cuisines.add(cuisine.toLowerCase());
+                }
+            }
+        }
+
         List<String> dishTypes = new ArrayList<>();
-        String area     = getStringSafe(data, "strArea").trim();
-        String category = getStringSafe(data, "strCategory").trim();
-        if (!area.isEmpty()     && !area.equalsIgnoreCase("Unknown"))
-            cuisines.add(area.toLowerCase());
-        if (!category.isEmpty()) dishTypes.add(category.toLowerCase());
+        if (data.has("dishTypes") && data.get("dishTypes").isJsonArray()) {
+            for (JsonElement d : data.getAsJsonArray("dishTypes")) {
+                if (!d.isJsonNull()) {
+                    String dishType = sanitizeName(d.getAsString());
+                    if (!dishType.isEmpty()) dishTypes.add(dishType.toLowerCase());
+                }
+            }
+        }
 
-        // Instrucciones de cocción
-        String instructions = getStringSafe(data, "strInstructions").trim();
-        String rawText      = instructions;   // TheMealDB no tiene summary separado
+        int healthScore = getIntSafe(data, "healthScore");
+
+        String summary      = stripHtml(getStringSafe(data, "summary"));
+        String instructions = stripHtml(getStringSafe(data, "instructions"));
+        String rawText      = (summary + " " + instructions).trim();
 
         return new RecipeData(name, ingredients, ingredientDetails,
                 readyInMinutes, servings, vegan, vegetarian, glutenFree, dairyFree,
                 cuisines, dishTypes, healthScore, rawText, instructions);
-    }
-
-    /** Extrae el número de una cadena de medida como "1 cup", "200 g", "3/4". */
-    private double parseMeasureAmount(String measure) {
-        if (measure == null || measure.isBlank()) return 0.0;
-        String[] parts = measure.trim().split("\\s+");
-        try {
-            String numPart = parts[0];
-            if (numPart.contains("/")) {
-                String[] frac = numPart.split("/");
-                return Double.parseDouble(frac[0]) / Double.parseDouble(frac[1]);
-            }
-            return Double.parseDouble(numPart);
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
-    }
-
-    /** Extrae la unidad de una cadena de medida como "1 cup" → "cup". */
-    private String parseMeasureUnit(String measure) {
-        if (measure == null || measure.isBlank()) return "";
-        String[] parts = measure.trim().split("\\s+", 2);
-        return parts.length > 1 ? sanitizeUnit(parts[1]) : "";
     }
 
     /**

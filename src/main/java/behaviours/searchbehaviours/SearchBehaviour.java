@@ -22,11 +22,14 @@ public class SearchBehaviour extends AchieveREResponder {
 
     private final HttpClient httpClient;
     private final Gson gson;
+    private final String apiKey;
 
-    public SearchBehaviour(Agent agent, MessageTemplate template, HttpClient httpClient, Gson gson) {
+    public SearchBehaviour(Agent agent, MessageTemplate template,
+                           HttpClient httpClient, Gson gson, String apiKey) {
         super(agent, template);
         this.httpClient = httpClient;
         this.gson = gson;
+        this.apiKey = apiKey;
     }
 
     protected ACLMessage handleRequest(ACLMessage request) {
@@ -47,37 +50,31 @@ public class SearchBehaviour extends AchieveREResponder {
             }
         }
 
-        // Traducir ES→EN
+        // Traducir ES→EN para que Spoonacular entienda los ingredientes
         String ingredientsEn = IngredientTranslator.translateIngredients(ingredients);
         if (!ingredientsEn.equals(ingredients)) {
             System.out.println("RecipeSearchAgent: traducción ES→EN: [" + ingredients + "] → [" + ingredientsEn + "]");
         }
-        System.out.println("RecipeSearchAgent: Searching TheMealDB for: " + ingredientsEn);
+        System.out.println("RecipeSearchAgent: Searching Spoonacular for: " + ingredientsEn);
 
         try {
-            // Usar el primer ingrediente para buscar en TheMealDB
-            String firstIngredient = ingredientsEn.split(",")[0].trim();
-            String encoded = URLEncoder.encode(firstIngredient, StandardCharsets.UTF_8.toString());
-            String url = "https://www.themealdb.com/api/json/v1/1/filter.php?i=" + encoded;
+            String encoded = URLEncoder.encode(ingredientsEn, StandardCharsets.UTF_8.toString());
+            String url = "https://api.spoonacular.com/recipes/findByIngredients?ingredients="
+                    + encoded + "&number=3&apiKey=" + this.apiKey;
 
             HttpRequest httpRequest = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
             HttpResponse<String> httpResponse = this.httpClient.send(httpRequest, BodyHandlers.ofString());
 
             if (httpResponse.statusCode() == 200) {
-                JsonObject body = this.gson.fromJson(httpResponse.body(), JsonObject.class);
-                JsonArray meals = body.has("meals") && !body.get("meals").isJsonNull()
-                        ? body.getAsJsonArray("meals") : new JsonArray();
-
+                JsonArray results = this.gson.fromJson(httpResponse.body(), JsonArray.class);
                 JsonArray recipesArray = new JsonArray();
-                int count = 0;
-                for (JsonElement el : meals) {
-                    if (count >= 3) break;
-                    JsonObject meal = el.getAsJsonObject();
+
+                for (JsonElement el : results) {
+                    JsonObject recipe = el.getAsJsonObject();
                     JsonObject rec = new JsonObject();
-                    rec.addProperty("id", Integer.parseInt(meal.get("idMeal").getAsString()));
-                    rec.addProperty("name", meal.get("strMeal").getAsString());
+                    rec.addProperty("id", recipe.get("id").getAsInt());
+                    rec.addProperty("name", recipe.get("title").getAsString());
                     recipesArray.add(rec);
-                    count++;
                 }
 
                 JsonObject result = new JsonObject();
@@ -87,12 +84,12 @@ public class SearchBehaviour extends AchieveREResponder {
                 reply.setContent(result.toString());
             } else {
                 reply.setPerformative(ACLMessage.FAILURE);
-                reply.setContent("{\"error\": \"TheMealDB status: " + httpResponse.statusCode() + "\"}");
+                reply.setContent("{\"error\": \"Failed to retrieve recipes. Status: " + httpResponse.statusCode() + "\"}");
             }
         } catch (Exception e) {
             e.printStackTrace();
             reply.setPerformative(ACLMessage.FAILURE);
-            reply.setContent("{\"error\": \"Error comunicando con TheMealDB: " + e.getMessage() + "\"}");
+            reply.setContent("{\"error\": \"Error communicating with Spoonacular API.\"}");
         }
 
         return reply;

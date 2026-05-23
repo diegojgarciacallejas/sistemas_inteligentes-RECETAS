@@ -16,13 +16,14 @@ import java.net.http.HttpClient;
 public class RecipeSearchAgent extends Agent {
 
     private HttpClient httpClient;
-    private Gson       gson;
+    private Gson gson;
+    private static final String API_KEY = "74e8728ac10847199e9b7db0f0d97a4e";
 
     @Override
     protected void setup() {
-        System.out.println("RecipeSearchAgent " + getAID().getName() + " iniciado (TheMealDB).");
+        System.out.println("RecipeSearchAgent " + getAID().getName() + " is ready.");
         httpClient = HttpClient.newHttpClient();
-        gson       = new Gson();
+        gson = new Gson();
 
         DFAgentDescription dfd = new DFAgentDescription();
         dfd.setName(getAID());
@@ -41,7 +42,7 @@ public class RecipeSearchAgent extends Agent {
                 MessageTemplate.MatchPerformative(ACLMessage.REQUEST)
         );
 
-        addBehaviour(new SearchBehaviour(this, template, httpClient, gson));
+        addBehaviour(new SearchBehaviour(this, template, httpClient, gson, API_KEY));
     }
 
     @Override
