@@ -10,6 +10,8 @@ import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.proto.AchieveREResponder;
 
+import utils.IngredientTranslator;
+
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -73,10 +75,12 @@ public class SearchBehaviour extends AchieveREResponder {
             }
         }
 
-        System.out.println("RecipeSearchAgent: buscando en Spoonacular: " + ingredients);
+        String ingredientsEn = IngredientTranslator.translateIngredients(ingredients);
+        System.out.println("RecipeSearchAgent: traducción ES→EN: " + ingredients + " → " + ingredientsEn);
+        System.out.println("RecipeSearchAgent: buscando en Spoonacular: " + ingredientsEn);
 
         try {
-            String encoded = URLEncoder.encode(ingredients, StandardCharsets.UTF_8);
+            String encoded = URLEncoder.encode(ingredientsEn, StandardCharsets.UTF_8);
             String url = SPOONACULAR_URL + encoded + "&apiKey=" + apiKey;
 
             HttpRequest httpRequest = HttpRequest.newBuilder()
@@ -97,7 +101,7 @@ public class SearchBehaviour extends AchieveREResponder {
                 }
 
                 JsonObject result = new JsonObject();
-                result.addProperty("userIngredients", ingredients);
+                result.addProperty("userIngredients", ingredientsEn);
                 result.add("recipes", recipesArray);
 
                 // Reenviar al pipeline: TextMiningAgent escucha RECIPE_SEARCH_RESULT
