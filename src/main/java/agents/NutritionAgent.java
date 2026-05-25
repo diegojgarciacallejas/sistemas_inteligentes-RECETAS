@@ -7,25 +7,28 @@ import jade.domain.DFService;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
 import jade.domain.FIPAAgentManagement.ServiceDescription;
 import jade.domain.FIPAException;
-import jade.domain.FIPANames;
-import jade.lang.acl.ACLMessage;
-import jade.lang.acl.MessageTemplate;
 
 import java.net.http.HttpClient;
 
+/**
+ * Agente que consulta Spoonacular para obtener información nutricional
+ * de recetas cuando se le pide.
+ *
+ * Escucha mensajes INFORM con conversationId "NUTRITION_RESULT_REQUEST"
+ * del RecommendationAgent y responde con conversationId "NUTRITION_RESULT".
+ */
 public class NutritionAgent extends Agent {
 
     private static final String API_KEY = "74e8728ac10847199e9b7db0f0d97a4e";
 
-    private HttpClient httpClient;
-    private Gson gson;
-
     @Override
     protected void setup() {
         System.out.println("NutritionAgent " + getAID().getName() + " is ready.");
-        httpClient = HttpClient.newHttpClient();
-        gson = new Gson();
 
+        HttpClient httpClient = HttpClient.newHttpClient();
+        Gson       gson       = new Gson();
+
+        // Registro en el DF (permite descubrimiento opcional por otros agentes)
         DFAgentDescription dfd = new DFAgentDescription();
         dfd.setName(getAID());
         ServiceDescription sd = new ServiceDescription();
@@ -39,12 +42,8 @@ public class NutritionAgent extends Agent {
             fe.printStackTrace();
         }
 
-        MessageTemplate template = MessageTemplate.and(
-                MessageTemplate.MatchProtocol(FIPANames.InteractionProtocol.FIPA_REQUEST),
-                MessageTemplate.MatchPerformative(ACLMessage.REQUEST)
-        );
-
-        addBehaviour(new NutritionBehaviour(this, template, httpClient, gson, API_KEY));
+        // Escucha en bucle los mensajes NUTRITION_RESULT_REQUEST
+        addBehaviour(new NutritionBehaviour(this, httpClient, gson, API_KEY));
     }
 
     @Override
